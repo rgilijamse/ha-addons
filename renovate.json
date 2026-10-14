@@ -1,12 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "customManagers": [
     {
       "customType": "regex",
       "description": "komodo-periphery's add-on version is the upstream Periphery version (plus an optional -rN suffix, dropped on a bump)",
-      "managerFilePatterns": ["/^komodo-periphery/config\\.yaml$/"],
-      "matchStrings": ["version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""],
+      "managerFilePatterns": [
+        "/^komodo-periphery/config\\.yaml$/"
+      ],
+      "matchStrings": [
+        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""
+      ],
       "depNameTemplate": "ghcr.io/moghtech/komodo-periphery",
       "datasourceTemplate": "docker",
       "versioningTemplate": "semver",
@@ -16,8 +22,17 @@
   "packageRules": [
     {
       "description": "A Periphery bump needs a CHANGELOG entry; the PR is a reminder, not an automerge",
-      "matchDepNames": ["ghcr.io/moghtech/komodo-periphery"],
+      "matchDepNames": [
+        "ghcr.io/moghtech/komodo-periphery"
+      ],
       "automerge": false
+    },
+    {
+      "description": "Don't chase GitHub runner versions: the build runners sit in the job matrix, which Renovate can't update, so a bump would only move the lint job",
+      "matchDatasources": [
+        "github-runners"
+      ],
+      "enabled": false
     }
   ]
 }
