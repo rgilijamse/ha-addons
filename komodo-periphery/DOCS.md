@@ -15,13 +15,19 @@ for Periphery and for anyone using it through Komodo:
   `SUPERVISOR_TOKEN` in every add-on's environment. Komodo's container detail view therefore
   shows less here than on a normal Docker host.
 
+Commands Komodo can have Periphery run (Repo `on_clone`/`on_pull`, Stack
+`pre_deploy`/`post_deploy`, Build `pre_build`) run as an unprivileged user that can reach only the
+proxy, never the real Docker socket. The add-on checks this on every start and refuses to run if
+that user can open the real socket. `SUPERVISOR_TOKEN` is removed from Periphery's environment.
+
 Deploying Stacks or Deployments to this server does not work, and is not meant to.
 
 ## Requirements
 
 - **Protection mode off.** The add-on needs `docker_api` access, which Supervisor only grants
-  with protection mode off. The proxy limits what Periphery can do with it, but the container
-  itself can still reach the real socket. Weigh that before installing.
+  with protection mode off. The add-on's own startup script and the proxy run as root and can
+  still reach the real socket; Periphery and everything it runs cannot. Weigh that before
+  installing.
 - Komodo Core v2. Periphery connects **out** to Core, so nothing listens on this host and no port
   is opened.
 
@@ -37,7 +43,8 @@ Deploying Stacks or Deployments to this server does not work, and is not meant t
 4. Set **Connect as** to the Server's name from step 1.
 5. Start the add-on and open its log. Periphery prints `Public Key: ...` on its first start.
    If Core pins a Periphery public key (globally or per Server), paste that key into the Server's
-   **Periphery Public Key** field in Core.
+   **Periphery Public Key** field in Core. Until then Core turns the connection away and
+   Periphery retries several times a second, so do this right after the first start.
 
 The keypair is kept in the add-on's data, so it survives restarts and updates. Uninstalling the
 add-on deletes it; a reinstall prints a new key to paste again.

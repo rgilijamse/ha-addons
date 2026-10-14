@@ -2,6 +2,10 @@
 # Starts the read-only Docker proxy, then Periphery in outbound mode (it dials Core; nothing
 # listens on this host). Exits as soon as either process dies, so Supervisor's watchdog restarts
 # the add-on rather than leaving Periphery running against a dead proxy.
+#
+# Periphery runs as the unprivileged periphery user, not root. Komodo can make Periphery run
+# shell commands (Repo on_clone/on_pull, Stack pre/post_deploy, Build pre_build), and as root those
+# would sit next to the real /run/docker.sock Supervisor mounts in, bypassing the proxy entirely.
 set -euo pipefail
 
 OPTIONS=/data/options.json
@@ -18,9 +22,8 @@ if [ -z "$CORE_ADDRESS" ] || [ -z "$CONNECT_AS" ]; then
     exit 1
 fi
 
-# The CA file comes from Home Assistant's /ssl folder. Upstream's entrypoint.sh runs
-# update-ca-certificates, which picks up anything in /usr/local/share/ca-certificates ending in
-# .crt, whatever the source file is called.
+# The CA file comes from Home Assistant's /ssl folder. update-ca-certificates picks up anything in
+# /usr/local/share/ca-certificates ending in .crt, whatever the source file is called.
 if [ -n "$CA_CERTIFICATE" ]; then
     if [ ! -f "/ssl/$CA_CERTIFICATE" ]; then
         echo "[ERROR] ca_certificate: /ssl/$CA_CERTIFICATE does not exist."
@@ -29,12 +32,14 @@ if [ -n "$CA_CERTIFICATE" ]; then
     mkdir -p /usr/local/share/ca-certificates
     cp "/ssl/$CA_CERTIFICATE" /usr/local/share/ca-certificates/addon-ca.crt
 fi
+update-ca-certificates >/dev/null
 
 # Everything Periphery writes lives under /data, the only path that survives a restart or an
 # update. Its Core public key defaults to <root_directory>/keys/core.pub, so it lands here too.
 export PERIPHERY_ROOT_DIRECTORY=/data/periphery
 export PERIPHERY_PRIVATE_KEY=file:/data/periphery/keys/periphery.key
 mkdir -p /data/periphery/keys
+chown -R periphery:periphery /data/periphery
 
 export PERIPHERY_CORE_ADDRESS="$CORE_ADDRESS"
 export PERIPHERY_CONNECT_AS="$CONNECT_AS"
@@ -46,6 +51,20 @@ export PERIPHERY_DISABLE_CONTAINER_TERMINALS=true
 export PERIPHERY_LOGGING_LEVEL="${LOG_LEVEL:-info}"
 export PERIPHERY_LOGGING_ANSI=false
 export DOCKER_HOST=unix:///run/docker-ro/docker.sock
+export HOME=/data/periphery
+# Not used by this add-on; unset so no command Periphery runs inherits it.
+unset SUPERVISOR_TOKEN
+
+as_periphery() {
+    setpriv --reuid=periphery --regid=periphery --init-groups --no-new-privs \
+        --inh-caps=-all --bounding-set=-all "$@"
+}
+
+# Fail closed: if the periphery user can open the real socket, the proxy is decoration.
+if as_periphery test -r /run/docker.sock -o -w /run/docker.sock; then
+    echo "[ERROR] the periphery user can access /run/docker.sock directly; refusing to start."
+    exit 1
+fi
 
 mkdir -p /run/docker-ro
 haproxy -f /etc/haproxy/docker-ro.cfg &
@@ -59,7 +78,7 @@ if [ ! -S /run/docker-ro/docker.sock ]; then
     exit 1
 fi
 
-entrypoint.sh periphery &
+as_periphery periphery &
 PERIPHERY_PID=$!
 
 trap 'kill -TERM "$HAPROXY_PID" "$PERIPHERY_PID" 2>/dev/null' TERM INT
