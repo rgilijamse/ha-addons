@@ -10,9 +10,6 @@ arch:
   - amd64
   - aarch64
 image: ghcr.io/rgilijamse/komodo-periphery-{arch}
-init: true
-startup: application
-boot: auto
 # Requires Protection mode off. The Docker socket is only ever reached through the read-only
 # allowlist proxy in rootfs/etc/haproxy/docker-ro.cfg; Periphery itself never sees it directly.
 docker_api: true
