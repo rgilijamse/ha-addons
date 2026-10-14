@@ -7,9 +7,9 @@ Repositories**:
 https://github.com/rgilijamse/ha-addons
 ```
 
-| Add-on | What it does |
-|---|---|
-| [Komodo Periphery (read-only)](komodo-periphery/) | Lets Komodo Core see this host's add-on containers, without being able to change them. |
+| | Add-on | What it does |
+|---|---|---|
+| <img src="komodo-periphery/icon.png" alt="" width="48"> | [Komodo Periphery (read-only)](komodo-periphery/) | Lets Komodo Core see this host's add-on containers, without being able to change them. |
 
 ## How releases work
 

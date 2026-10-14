@@ -1,5 +1,8 @@
 # Komodo Periphery (read-only)
 
+<!-- Absolute URL: Home Assistant's add-on store shows this file too and can't resolve relative paths. -->
+![Komodo Periphery (read-only)](https://raw.githubusercontent.com/rgilijamse/ha-addons/main/komodo-periphery/logo.png)
+
 ![Supports amd64][amd64-shield] ![Supports aarch64][aarch64-shield]
 
 A [Komodo](https://komo.do) Periphery agent for Home Assistant OS that lets Komodo Core *see*
@@ -9,6 +12,7 @@ the add-on containers on this host without being able to change them.
 - Connects out to Core (Komodo v2), so no port is opened on this host.
 - Docker access only through a read-only allowlist proxy: no start/stop, exec, file copy or
   container inspect.
+- Optional: lets Komodo prune unused anonymous volumes, which pile up on Home Assistant OS.
 - Trusts a private CA from Home Assistant's `/ssl` folder.
 
 See the **Documentation** tab for setup.
