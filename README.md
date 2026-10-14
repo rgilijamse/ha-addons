@@ -21,3 +21,9 @@ and tests it but releases nothing.
 For `komodo-periphery`, the version *is* the upstream Periphery version, with an optional `-rN`
 suffix for add-on-only changes (`2.3.3`, `2.3.3-r1`, ...). Renovate opens a pull request when a new
 Periphery release appears; merging it releases the add-on.
+
+## License
+
+The files in this repository are [MIT](LICENSE)-licensed. The published images also contain
+third-party software under its own license: `komodo-periphery` is built on the official
+[Komodo](https://github.com/moghtech/komodo) Periphery image, which is GPL-3.0.

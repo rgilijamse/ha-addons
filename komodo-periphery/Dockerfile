@@ -13,7 +13,8 @@ ARG BUILD_ARCH
 LABEL io.hass.type="addon" \
       io.hass.version="${BUILD_VERSION}" \
       io.hass.arch="${BUILD_ARCH}" \
-      org.opencontainers.image.source="https://github.com/rgilijamse/ha-addons"
+      org.opencontainers.image.source="https://github.com/rgilijamse/ha-addons" \
+      org.opencontainers.image.licenses="MIT AND GPL-3.0"
 
 # Replaces upstream's entrypoint.sh: run.sh does its update-ca-certificates itself, as root,
 # before dropping to the periphery user.
