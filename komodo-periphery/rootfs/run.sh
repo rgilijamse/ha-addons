@@ -29,8 +29,16 @@ if [ -n "$CA_CERTIFICATE" ]; then
         echo "[ERROR] ca_certificate: /ssl/$CA_CERTIFICATE does not exist."
         exit 1
     fi
+    # update-ca-certificates silently skips anything that isn't a PEM certificate.
+    if ! CA_SUBJECT="$(openssl x509 -inform PEM -in "/ssl/$CA_CERTIFICATE" -noout -subject 2>/dev/null)"; then
+        echo "[ERROR] ca_certificate: /ssl/$CA_CERTIFICATE is not a PEM certificate."
+        exit 1
+    fi
+    echo "[INFO] Trusting CA /ssl/$CA_CERTIFICATE: $CA_SUBJECT"
     mkdir -p /usr/local/share/ca-certificates
     cp "/ssl/$CA_CERTIFICATE" /usr/local/share/ca-certificates/addon-ca.crt
+else
+    echo "[INFO] No ca_certificate set; trusting public CAs only."
 fi
 update-ca-certificates >/dev/null
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.3-r2
+
+- The **CA certificate** option is now always shown. It used to be hidden behind "Show unused
+  optional configuration options", so it was easy to miss, and Periphery then failed with
+  `invalid peer certificate: UnknownIssuer`.
+- The log now says which CA is trusted (or that none is), and the add-on refuses to start if the
+  CA file is not a PEM certificate instead of ignoring it silently.
+
 ## 2.3.3-r1
 
 - Periphery now runs as an unprivileged user that can only reach the read-only Docker proxy.

@@ -2,7 +2,7 @@
 # add-on-only changes (2.3.3, then 2.3.3-r1, ...). CI builds FROM the matching upstream tag with the
 # suffix stripped, so this line is the one place a Periphery bump happens -- Renovate edits it.
 name: Komodo Periphery (read-only)
-version: "2.3.3-r1"
+version: "2.3.3-r2"
 slug: komodo_periphery
 description: Read-only Komodo Periphery agent, so Komodo Core can see this host's add-on containers
 url: https://github.com/rgilijamse/ha-addons/tree/main/komodo-periphery
@@ -16,9 +16,13 @@ docker_api: true
 map:
   - type: ssl
     read_only: true
+# ca_certificate is listed here (empty) only so the UI shows it: optional options without a
+# default are hidden behind "Show unused optional configuration options", and most setups with a
+# private Core certificate need this one. onboarding_key stays hidden; it is rarely needed.
 options:
   core_address: ""
   connect_as: ""
+  ca_certificate: ""
   log_level: info
 schema:
   core_address: str

@@ -59,6 +59,12 @@ add-on deletes it; a reinstall prints a new key to paste again.
 | `ca_certificate` | no | File name in `/ssl` of a CA certificate to trust. |
 | `log_level` | no | `trace`, `debug`, `info` (default), `warn` or `error`. |
 
+## Troubleshooting
+
+`invalid peer certificate: UnknownIssuer` means Periphery doesn't trust Core's certificate. Check
+the first lines of the log: `Trusting CA ...` should name your CA (the root, not an intermediate).
+If it says `No ca_certificate set`, set **CA certificate**.
+
 ## Log
 
 Denied Docker calls are logged by the proxy as `403` lines. A few at startup or when someone
