@@ -1,0 +1,31 @@
+# The add-on version is the upstream Periphery version, optionally with an "-rN" suffix for
+# add-on-only changes (2.3.3, then 2.3.3-r1, ...). CI builds FROM the matching upstream tag with the
+# suffix stripped, so this line is the one place a Periphery bump happens -- Renovate edits it.
+name: Komodo Periphery (read-only)
+version: "2.3.3"
+slug: komodo_periphery
+description: Read-only Komodo Periphery agent, so Komodo Core can see this host's add-on containers
+url: https://github.com/rgilijamse/ha-addons/tree/main/komodo-periphery
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/rgilijamse/komodo-periphery-{arch}
+init: true
+startup: application
+boot: auto
+# Requires Protection mode off. The Docker socket is only ever reached through the read-only
+# allowlist proxy in rootfs/etc/haproxy/docker-ro.cfg; Periphery itself never sees it directly.
+docker_api: true
+map:
+  - type: ssl
+    read_only: true
+options:
+  core_address: ""
+  connect_as: ""
+  log_level: info
+schema:
+  core_address: str
+  connect_as: str
+  onboarding_key: password?
+  ca_certificate: str?
+  log_level: list(trace|debug|info|warn|error)

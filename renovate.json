@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "komodo-periphery's add-on version is the upstream Periphery version (plus an optional -rN suffix, dropped on a bump)",
+      "managerFilePatterns": ["/^komodo-periphery/config\\.yaml$/"],
+      "matchStrings": ["version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""],
+      "depNameTemplate": "ghcr.io/moghtech/komodo-periphery",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver",
+      "autoReplaceStringTemplate": "version: \"{{{newValue}}}\""
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "A Periphery bump needs a CHANGELOG entry; the PR is a reminder, not an automerge",
+      "matchDepNames": ["ghcr.io/moghtech/komodo-periphery"],
+      "automerge": false
+    }
+  ]
+}

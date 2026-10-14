@@ -1,0 +1,22 @@
+configuration:
+  core_address:
+    name: Core address
+    description: >-
+      WebSocket address of Komodo Core, for example wss://komodo.example.lan:9120. The host name
+      must match a name in Core's TLS certificate.
+  connect_as:
+    name: Connect as
+    description: Name of the Server in Komodo Core this agent connects as.
+  onboarding_key:
+    name: Onboarding key
+    description: >-
+      Only needed when Core should create the Server on first connect. Leave empty when the Server
+      already exists in Core.
+  ca_certificate:
+    name: CA certificate
+    description: >-
+      File name, relative to Home Assistant's /ssl folder, of a CA certificate to trust. Needed
+      when Core's certificate is issued by a private CA.
+  log_level:
+    name: Log level
+    description: Periphery's log level.
