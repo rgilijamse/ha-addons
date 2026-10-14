@@ -2,7 +2,7 @@
 # add-on-only changes (2.3.3, then 2.3.3-r1, ...). CI builds FROM the matching upstream tag with the
 # suffix stripped, so this line is the one place a Periphery bump happens -- Renovate edits it.
 name: Komodo Periphery (read-only)
-version: "2.3.3-r2"
+version: "2.3.3-r3"
 slug: komodo_periphery
 description: Read-only Komodo Periphery agent, so Komodo Core can see this host's add-on containers
 url: https://github.com/rgilijamse/ha-addons/tree/main/komodo-periphery
@@ -23,10 +23,12 @@ options:
   core_address: ""
   connect_as: ""
   ca_certificate: ""
+  allow_volume_prune: false
   log_level: info
 schema:
   core_address: str
   connect_as: str
   onboarding_key: password?
   ca_certificate: str?
+  allow_volume_prune: bool
   log_level: list(trace|debug|info|warn|error)

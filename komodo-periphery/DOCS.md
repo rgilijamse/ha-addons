@@ -22,6 +22,18 @@ that user can open the real socket. `SUPERVISOR_TOKEN` is removed from Periphery
 
 Deploying Stacks or Deployments to this server does not work, and is not meant to.
 
+### The one opt-in write: volume prune
+
+Images whose Dockerfile declares a `VOLUME` get a new anonymous volume every time their container
+is recreated, and Supervisor recreates containers on every add-on start and update. Docker never
+attaches an old anonymous volume to a new container, so they pile up unused. With **Allow volume
+prune** on, Komodo's **Prune Volumes** removes them.
+
+It removes only unused *anonymous* volumes. Komodo asks for all unused volumes, named ones
+included; the proxy drops that part of the request, so Docker falls back to its default of
+anonymous only. Named volumes are never removed. Image prune stays blocked: Supervisor removes a
+stopped add-on's container, so its image looks unused and a prune would delete it.
+
 ## Requirements
 
 - **Protection mode off.** The add-on needs `docker_api` access, which Supervisor only grants
@@ -57,6 +69,7 @@ add-on deletes it; a reinstall prints a new key to paste again.
 | `connect_as` | yes | Name of the Server in Core. |
 | `onboarding_key` | no | Lets Core create the Server on first connect. Not needed when it already exists. |
 | `ca_certificate` | no | File name in `/ssl` of a CA certificate to trust. |
+| `allow_volume_prune` | no | Let Komodo prune unused anonymous volumes (off by default). |
 | `log_level` | no | `trace`, `debug`, `info` (default), `warn` or `error`. |
 
 ## Troubleshooting

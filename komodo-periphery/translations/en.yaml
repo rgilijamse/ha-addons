@@ -17,6 +17,11 @@ configuration:
     description: >-
       File name, relative to Home Assistant's /ssl folder, of a CA certificate to trust. Needed
       when Core's certificate is issued by a private CA.
+  allow_volume_prune:
+    name: Allow volume prune
+    description: >-
+      Lets Komodo's Prune Volumes remove unused anonymous volumes. Named volumes are never
+      removed, and every other change stays blocked.
   log_level:
     name: Log level
     description: Periphery's log level.

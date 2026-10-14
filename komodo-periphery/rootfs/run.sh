@@ -60,6 +60,14 @@ export PERIPHERY_LOGGING_LEVEL="${LOG_LEVEL:-info}"
 export PERIPHERY_LOGGING_ANSI=false
 export DOCKER_HOST=unix:///run/docker-ro/docker.sock
 export HOME=/data/periphery
+
+# Read by the proxy config (env(ALLOW_VOLUME_PRUNE)), not by Periphery.
+if [ "$(opt allow_volume_prune)" = "true" ]; then
+    export ALLOW_VOLUME_PRUNE=true
+    echo "[INFO] Volume prune allowed: unused anonymous volumes only."
+else
+    export ALLOW_VOLUME_PRUNE=false
+fi
 # Not used by this add-on; unset so no command Periphery runs inherits it.
 unset SUPERVISOR_TOKEN
 

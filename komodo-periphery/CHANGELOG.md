@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.3-r3
+
+- New option **Allow volume prune** (off by default). When on, Komodo's Prune Volumes removes
+  unused *anonymous* volumes. Images whose Dockerfile declares a `VOLUME` leave one behind every
+  time their container is recreated, and nothing ever attaches them again. Named volumes are never
+  removed: the proxy drops Komodo's `all` filter, and only allows the prune on Docker API v1.42 and
+  later, where an unfiltered prune leaves named volumes alone.
+
 ## 2.3.3-r2
 
 - The **CA certificate** option is now always shown. It used to be hidden behind "Show unused
