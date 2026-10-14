@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.3-r4
+
+- Container logs work in Komodo. Periphery fetches logs with `docker logs`, which inspects the
+  container first, and inspect was blocked. Inspect is now allowed with the container's
+  environment replaced by a `REDACTED=...` marker, so `SUPERVISOR_TOKEN` and other add-on secrets
+  still never leave the host. Komodo's container detail view works too, minus the environment.
+
 ## 2.3.3-r3
 
 - New option **Allow volume prune** (off by default). When on, Komodo's Prune Volumes removes

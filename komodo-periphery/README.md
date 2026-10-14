@@ -10,8 +10,8 @@ the add-on containers on this host without being able to change them.
 
 - Official `ghcr.io/moghtech/komodo-periphery` image, pinned to an exact version.
 - Connects out to Core (Komodo v2), so no port is opened on this host.
-- Docker access only through a read-only allowlist proxy: no start/stop, exec, file copy or
-  container inspect.
+- Docker access only through a read-only allowlist proxy: no start/stop, exec or file copy, and
+  container environments (with `SUPERVISOR_TOKEN`) are redacted.
 - Optional: lets Komodo prune unused anonymous volumes, which pile up on Home Assistant OS.
 - Trusts a private CA from Home Assistant's `/ssl` folder.
 

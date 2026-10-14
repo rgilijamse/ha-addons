@@ -82,14 +82,18 @@ if as_periphery test -r /run/docker.sock -o -w /run/docker.sock; then
     exit 1
 fi
 
+# Container inspect with the environment redacted; only haproxy (root) connects to this socket.
+socat UNIX-LISTEN:/run/inspect-redact.sock,fork,mode=600 EXEC:/usr/local/bin/inspect-redact.sh &
+REDACT_PID=$!
+
 mkdir -p /run/docker-ro
 haproxy -f /etc/haproxy/docker-ro.cfg &
 HAPROXY_PID=$!
 for _ in $(seq 50); do
-    [ -S /run/docker-ro/docker.sock ] && break
+    [ -S /run/docker-ro/docker.sock ] && [ -S /run/inspect-redact.sock ] && break
     sleep 0.1
 done
-if [ ! -S /run/docker-ro/docker.sock ]; then
+if [ ! -S /run/docker-ro/docker.sock ] || [ ! -S /run/inspect-redact.sock ]; then
     echo "[ERROR] read-only Docker proxy did not start."
     exit 1
 fi
@@ -97,10 +101,10 @@ fi
 as_periphery periphery &
 PERIPHERY_PID=$!
 
-trap 'kill -TERM "$HAPROXY_PID" "$PERIPHERY_PID" 2>/dev/null' TERM INT
+trap 'kill -TERM "$HAPROXY_PID" "$REDACT_PID" "$PERIPHERY_PID" 2>/dev/null' TERM INT
 set +e
-wait -n "$HAPROXY_PID" "$PERIPHERY_PID"
+wait -n "$HAPROXY_PID" "$REDACT_PID" "$PERIPHERY_PID"
 STATUS=$?
-kill -TERM "$HAPROXY_PID" "$PERIPHERY_PID" 2>/dev/null
+kill -TERM "$HAPROXY_PID" "$REDACT_PID" "$PERIPHERY_PID" 2>/dev/null
 wait
 exit "$STATUS"

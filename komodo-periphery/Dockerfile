@@ -2,7 +2,7 @@ ARG PERIPHERY_VERSION
 FROM ghcr.io/moghtech/komodo-periphery:${PERIPHERY_VERSION}
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends haproxy jq \
+    && apt-get install -y --no-install-recommends haproxy jq socat \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --no-create-home --home-dir /data/periphery --shell /usr/sbin/nologin periphery
 

@@ -11,9 +11,10 @@ for Periphery and for anyone using it through Komodo:
 - starting, stopping, restarting or removing containers;
 - exec, attach and terminals;
 - copying files out of containers, or exporting containers and images;
-- **container inspect**. Inspect returns a container's environment, and Supervisor puts a
-  `SUPERVISOR_TOKEN` in every add-on's environment. Komodo's container detail view therefore
-  shows less here than on a normal Docker host.
+- **container environments**. Inspect is allowed, but the add-on replaces each container's
+  environment with a `REDACTED=...` marker before Komodo sees it: Supervisor puts a
+  `SUPERVISOR_TOKEN` in every add-on's environment. Everything else in Komodo's container view,
+  logs included, works as on a normal Docker host.
 
 Commands Komodo can have Periphery run (Repo `on_clone`/`on_pull`, Stack
 `pre_deploy`/`post_deploy`, Build `pre_build`) run as an unprivileged user that can reach only the
@@ -80,5 +81,5 @@ If it says `No ca_certificate set`, set **CA certificate**.
 
 ## Log
 
-Denied Docker calls are logged by the proxy as `403` lines. A few at startup or when someone
-opens a container's detail page in Komodo are expected. Allowed calls are not logged.
+Denied Docker calls and volume prunes are logged by the proxy; denials show as `403` lines.
+Allowed reads are not logged.
