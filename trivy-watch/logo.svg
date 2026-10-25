@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="250" height="100" viewBox="0 0 250 100">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16606f"/>
+      <stop offset="1" stop-color="#0a3540"/>
+    </linearGradient>
+    <pattern id="ribs" width="8" height="10" patternUnits="userSpaceOnUse">
+      <rect x="5" y="0" width="3" height="10" fill="#000" fill-opacity="0.18"/>
+    </pattern>
+  </defs>
+
+  <rect width="250" height="100" rx="18" fill="url(#bg)"/>
+
+  <g transform="translate(6 -14) scale(0.9)">
+    <rect x="18" y="34" width="74" height="48" rx="4" fill="#8fd3df"/>
+    <rect x="18" y="34" width="74" height="48" rx="4" fill="url(#ribs)"/>
+    <rect x="18" y="34" width="74" height="7" rx="3" fill="#000" fill-opacity="0.15"/>
+    <circle cx="80" cy="78" r="20" fill="#0a3540" fill-opacity="0.55" stroke="#ffd166" stroke-width="7"/>
+    <line x1="94.5" y1="92.5" x2="110" y2="108" stroke="#ffd166" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="80" cy="78" r="5" fill="#ff6b6b"/>
+  </g>
+
+  <text x="118" y="47" font-family="DejaVu Sans, Arial, sans-serif" font-size="25" font-weight="bold" fill="#ffffff">Trivy</text>
+  <text x="118" y="74" font-family="DejaVu Sans, Arial, sans-serif" font-size="25" fill="#8fd3df">watch</text>
+</svg>
