@@ -4,10 +4,12 @@
 FROM aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
 
 # bash and socat for inspect-redact.sh; setpriv and ionice (util-linux) for run.sh; curl, jq and
-# tzdata for trivy-watch, which then skips installing them at start.
+# tzdata for trivy-watch, which then skips installing them at start. The scanner user gets fixed
+# IDs well above the host's system range: Alpine's next free system IDs (101/102) can be the owner
+# or group of the Docker socket Supervisor mounts in, which would hand the scanner direct access.
 RUN apk add --no-cache bash curl haproxy jq setpriv socat tzdata util-linux-misc \
-    && addgroup -S scanner \
-    && adduser -S -D -H -G scanner -h /data/state -s /sbin/nologin scanner
+    && addgroup -S -g 10001 scanner \
+    && adduser -S -D -H -u 10001 -G scanner -h /data/state -s /sbin/nologin scanner
 
 COPY rootfs /
 

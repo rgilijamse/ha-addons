@@ -66,9 +66,16 @@ as_scanner() {
         --inh-caps=-all --bounding-set=-all "$@"
 }
 
+# Without the socket, the check below passes for the wrong reason and every scan fails with a 503.
+if [ ! -S /run/docker.sock ]; then
+    echo "[ERROR] /run/docker.sock is missing: turn Protection mode off on the Info tab, then restart."
+    exit 1
+fi
+
 # Fail closed: if the scanner user can open the real socket, the proxy is decoration.
 if as_scanner test -r /run/docker.sock -o -w /run/docker.sock; then
     echo "[ERROR] the scanner user can access /run/docker.sock directly; refusing to start."
+    echo "[ERROR] socket $(stat -c 'owner %u, group %g, mode %a' /run/docker.sock); scanner $(id scanner)"
     exit 1
 fi
 echo "[INFO] The scanner user can't open /run/docker.sock; it reaches Docker only through the proxy."
