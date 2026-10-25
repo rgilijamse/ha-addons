@@ -1,0 +1,296 @@
+#!/bin/sh
+# Daily vulnerability scan of every image a running container uses, run as a long-lived container
+# on each Docker host. The same script everywhere; everything host-specific comes in through the
+# environment.
+#
+# What it reports, and why so little: a plain "fixable HIGH/CRITICAL" list was a few thousand lines
+# on the 2026-10-21 one-off scan, most of it Go stdlib CVEs in helper binaries (gosu in every
+# postgres/mysql image) that only an upstream rebuild can fix. So:
+#   - only fixable findings (--ignore-unfixed), only HIGH and CRITICAL;
+#   - gosu skipped outright (SKIP_FILES), and HIGH findings in Go's stdlib dropped (CRITICAL kept);
+#   - only what is NEW since the previous run goes to Teams, keyed on image reference + CVE +
+#     package, so a nightly re-pull of an image with the same finding doesn't re-alert. Bumping a
+#     pinned tag does re-alert whatever the new tag still carries -- intended;
+#   - images matching exceptions.txt are scanned and kept in state but never alerted on.
+# History lives in the container log, not in Teams: every new finding is logged as NEW, every one
+# that disappeared (image fixed upstream, or container removed) as RESOLVED with the date it was
+# first seen, which state keeps per finding. `docker logs trivy-watch | grep RESOLVED`.
+# The first run (no state yet) only records a baseline and sends nothing.
+#
+# Weekly digest (DIGEST_DAY, after the scan): running images built more than STALE_DAYS ago or on
+# an end-of-life OS -- the "maintainer stopped rebuilding" signal that a CVE diff can't give --
+# plus exceptions past their review date, and whether this Trivy is behind upstream. Trivy is
+# pinned by digest where it is deployed, so nothing updates it but a deliberate bump; take
+# releases at least two weeks old (its own release pipeline was compromised in early 2026).
+#
+# Known blind spot: images built on the official php images get PHP compiled from source, so
+# Trivy never sees a PHP version there. That's what the advisory feed is for.
+#
+# healthchecks.io: /start before, success after, /fail with the reason when a scan failed or Teams
+# didn't accept the message. A dead scanner looks exactly like a clean fleet otherwise.
+#
+# Busybox sh (the Trivy image is Alpine): no arrays, no [[ ]]. curl, jq and tzdata are installed at
+# container start (not per run) unless the image already has them: the Trivy image has none, Docker's
+# API needs a unix socket, and without tzdata TZ is silently ignored and RUN_AT means UTC.
+#
+# SOCK is the Docker API socket for the script's own calls, and Trivy gets the same one through
+# DOCKER_HOST unless that is set separately. Pointing SOCK at a filtering proxy works as long as it
+# allows what the script and Trivy call: containers/json, containers/{id}/json, and per image
+# (always addressed by ID) images/{id}/json, images/{id}/history and images/get?names={id}.
+set -u
+
+HOST_LABEL=${HOST_LABEL:?set HOST_LABEL}
+RUN_AT=${RUN_AT:-05:00}
+DIGEST_DAY=${DIGEST_DAY:-1}          # date +%u, 1 = Monday
+STALE_DAYS=${STALE_DAYS:-60}
+DRY_RUN=${DRY_RUN:-0}                # 1: print what would be sent, send nothing, ping nothing
+RUN_ON_START=${RUN_ON_START:-0}      # 1: run once immediately, then follow the schedule
+ONESHOT=${ONESHOT:-0}                # 1: run once and exit (testing)
+FORCE_DIGEST=${FORCE_DIGEST:-0}      # 1: send the digest on every run (testing)
+SKIP_FILES=${SKIP_FILES:-/usr/local/bin/gosu /usr/sbin/gosu /usr/bin/gosu}
+MAX_LINES=${MAX_LINES:-40}           # findings listed in one Teams message; the rest are counted
+TEAMS_WEBHOOK_URL=${TEAMS_WEBHOOK_URL:-}
+HC_PING_URL=${HC_PING_URL:-}
+ADVISORY_HEARTBEAT=${ADVISORY_HEARTBEAT:-}   # advisory-watch.sh's last-ok file, where it runs
+EXCEPTIONS=${EXCEPTIONS:-/etc/trivy-watch/exceptions.txt}
+STATE=${STATE:-/state}                # findings, Trivy's DB and cache
+SOCK=${SOCK:-/var/run/docker.sock}
+export DOCKER_HOST="${DOCKER_HOST:-unix://$SOCK}"
+
+log() { echo "$(date '+%Y-%m-%dT%H:%M:%S%z') $*"; }
+
+trap 'exit 0' TERM INT
+
+if ! command -v curl >/dev/null || ! command -v jq >/dev/null || [ ! -d /usr/share/zoneinfo ]; then
+    until apk add -q --no-cache curl jq tzdata >/dev/null 2>&1; do
+        log "apk add curl jq tzdata failed, retrying in 5 minutes"
+        sleep 300 & wait $!
+    done
+fi
+mkdir -p "$STATE/cache" "$STATE/run"
+
+hc() {  # hc <suffix> [body]
+    [ -n "$HC_PING_URL" ] && [ "$DRY_RUN" != 1 ] || return 0
+    curl -fsS -m 10 --retry 3 -o /dev/null --data-raw "${2:-}" "$HC_PING_URL$1" \
+        || log "healthchecks ping $1 failed"
+}
+
+# teams <title> <markdown file>; returns non-zero if Teams didn't take it.
+teams() {
+    if [ "$DRY_RUN" = 1 ] || [ -z "$TEAMS_WEBHOOK_URL" ]; then
+        log "TEAMS (not sent): $1"; sed 's/^/    /' "$2"; return 0
+    fi
+    jq -n --arg title "$1" --rawfile body "$2" '{
+        type: "message",
+        attachments: [{
+            contentType: "application/vnd.microsoft.card.adaptive",
+            content: {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                type: "AdaptiveCard", version: "1.4", msteams: {width: "Full"},
+                body: [
+                    {type: "TextBlock", text: $title, weight: "Bolder", size: "Medium", wrap: true},
+                    {type: "TextBlock", text: $body, wrap: true}
+                ]
+            }
+        }]
+    }' | curl -fsS -m 30 --retry 3 -o /dev/null -H 'Content-Type: application/json' \
+        --data-binary @- "$TEAMS_WEBHOOK_URL"
+}
+
+# Prints the exception line matching image reference $1 (shell glob in column 1), if any.
+exception_for() {
+    [ -f "$EXCEPTIONS" ] || return 0
+    grep -v '^[[:space:]]*\(#\|$\)' "$EXCEPTIONS" | while read -r pat review reason; do
+        # shellcheck disable=SC2254
+        case "$1" in $pat) echo "$pat $review $reason"; break ;; esac
+    done
+}
+
+scan() {
+    R="$STATE/run"
+    rm -f "$R"/*
+    fails=""
+    SCAN_ERR="" SCAN_FATAL=0
+
+    # container name, configured image reference, image id. Config.Image rather than the list's
+    # Image field, which degrades to the bare id once the tag has moved on to a newer pull.
+    if ! curl -fsS --unix-socket "$SOCK" 'http://d/containers/json' >"$R/ps.json"; then
+        SCAN_ERR="docker API unreachable" SCAN_FATAL=1; return 1
+    fi
+    for id in $(jq -r '.[].Id' "$R/ps.json"); do
+        curl -fsS --unix-socket "$SOCK" "http://d/containers/$id/json" \
+            | jq -r '[(.Name | ltrimstr("/")), .Config.Image, .Image] | @tsv'
+    done >"$R/containers.tsv"
+
+    skip=""
+    for f in $SKIP_FILES; do skip="$skip --skip-files $f"; done
+
+    for iid in $(cut -f3 "$R/containers.tsv" | sort -u); do
+        ref=$(awk -F'\t' -v i="$iid" '$3 == i { print $2; exit }' "$R/containers.tsv")
+        names=$(awk -F'\t' -v i="$iid" '$3 == i { printf "%s%s", s, $1; s = "," }' "$R/containers.tsv")
+        short=$(echo "$iid" | cut -c8-19)
+        # shellcheck disable=SC2086
+        if ! trivy image --quiet --cache-dir "$STATE/cache" --scanners vuln --image-src docker \
+                --ignore-unfixed --severity HIGH,CRITICAL $skip --timeout 20m \
+                --format json --output "$R/$short.json" "$iid" >"$R/$short.err" 2>&1; then
+            log "scan failed: $ref ($short): $(tail -c 300 "$R/$short.err")"
+            fails="$fails $ref"
+            printf '%s\n' "$ref" >>"$R/failed.txt"
+            continue
+        fi
+        exc=$(exception_for "$ref")
+        # One line per finding: key (ref|id|pkg), severity, installed, fixed, title, excepted;
+        # report() adds column 7, the date the finding was first seen.
+        jq -r --arg ref "$ref" --arg exc "${exc:+1}" '
+            [.Results[]? | .Vulnerabilities[]?
+             | select(.Severity == "CRITICAL" or .PkgName != "stdlib")]
+            | unique_by(.VulnerabilityID + "|" + .PkgName)[]
+            | [$ref + "|" + .VulnerabilityID + "|" + .PkgName, .Severity, .InstalledVersion,
+               .FixedVersion, ((.Title // "") | .[0:90]), $exc]
+            | @tsv' "$R/$short.json" >>"$R/findings.tsv"
+        # Image facts for the digest: ref, containers, build date, age in days, OS, EOL flag.
+        jq -r --arg ref "$ref" --arg names "$names" '
+            (.Metadata.ImageConfig.created // "") as $c
+            | ($c | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | try fromdateiso8601 catch null) as $t
+            | [$ref, $names, ($c | .[0:10]),
+               (if $t == null or $t < 86400 then "?" else ((now - $t) / 86400 | floor | tostring) end),
+               ((.Metadata.OS.Family // "-") + " " + (.Metadata.OS.Name // "")),
+               (if .Metadata.OS.EOSL then "EOL" else "" end)]
+            | @tsv' "$R/$short.json" >>"$R/images.tsv"
+    done
+    touch "$R/findings.tsv" "$R/images.tsv"
+    sort -u -o "$R/findings.tsv" "$R/findings.tsv"
+    [ -z "$fails" ] || { SCAN_ERR="scan failed for:$fails"; return 1; }
+}
+
+report() {
+    R="$STATE/run"
+    first=0
+    [ -f "$STATE/findings.tsv" ] || { first=1; : >"$STATE/findings.tsv"; }
+
+    # Findings of an image whose scan failed this time are carried over from the previous state,
+    # so they neither "resolve" now nor re-alert on the next good run.
+    if [ -f "$R/failed.txt" ]; then
+        awk -F'\t' 'NR == FNR { f[$0]; next } { split($1, k, "|"); if (k[1] in f) print }' \
+            "$R/failed.txt" "$STATE/findings.tsv" >>"$R/findings.tsv"
+        sort -u -o "$R/findings.tsv" "$R/findings.tsv"
+    fi
+
+    # First-seen date (column 7), carried over from the previous state; today for anything new.
+    # State written before this column existed (2026-10-22) gets its own file date: the finding
+    # was open at least since then, and the baseline was only a day earlier.
+    today=$(date +%Y-%m-%d)
+    prev=$(date -r "$STATE/findings.tsv" +%Y-%m-%d)
+    awk -F'\t' -v OFS='\t' -v today="$today" -v prev="$prev" '
+        NR == FNR { fs[$1] = ($7 != "" ? $7 : prev); next }
+        { $7 = ($1 in fs ? fs[$1] : today); print }' \
+        "$STATE/findings.tsv" "$R/findings.tsv" >"$R/findings.dated"
+    mv "$R/findings.dated" "$R/findings.tsv"
+
+    awk -F'\t' 'NR == FNR { seen[$1]; next } !($1 in seen) && $6 != "1"' \
+        "$STATE/findings.tsv" "$R/findings.tsv" >"$R/new.tsv"
+    # Gone since the previous run: fixed by an image update, or the container was removed. Logged
+    # only, so `docker logs trivy-watch | grep RESOLVED` is the history of fixes.
+    awk -F'\t' 'NR == FNR { cur[$1]; next } !($1 in cur)' \
+        "$R/findings.tsv" "$STATE/findings.tsv" >"$R/resolved.tsv"
+    total=$(wc -l <"$R/findings.tsv")
+    new=$(wc -l <"$R/new.tsv")
+    resolved=$(wc -l <"$R/resolved.tsv")
+    log "$total fixable finding(s) in scope, $new new, $resolved resolved"
+    awk -F'\t' -v today="$today" -v prev="$prev" \
+        '{ printf "    RESOLVED %s %s (open %s to %s)\n", $2, $1, ($7 != "" ? $7 : prev), today }' \
+        "$R/resolved.tsv"
+
+    sent=0
+    if [ "$first" = 1 ]; then
+        log "first run: baseline of $total finding(s) recorded, nothing sent"
+    elif [ "$new" -gt 0 ]; then
+        # Grouped per image, CRITICAL first; full list in the container log.
+        sort -t "$(printf '\t')" -k2,2 -k1,1 "$R/new.tsv" | awk -F'\t' -v max="$MAX_LINES" '
+            { split($1, k, "|")
+              if (n < max) {
+                  if (k[1] != last) { printf "%s**%s**\n\n", (n ? "\n" : ""), k[1]; last = k[1] }
+                  printf "- %s %s %s %s -> %s: %s\n", $2, k[2], k[3], $3, $4, $5
+              }
+              n++ }
+            END { if (n > max) printf "\n...and %d more, see docker logs trivy-watch\n", n - max }
+        ' >"$R/new.md"
+        awk -F'\t' '{ printf "    NEW %s %s %s -> %s: %s\n", $2, $1, $3, $4, $5 }' "$R/new.tsv"
+        teams "Trivy $HOST_LABEL: $new new fixable vulnerabilit$([ "$new" = 1 ] && echo y || echo ies)" \
+            "$R/new.md" || sent=1
+    fi
+    # Advance the state only once Teams has taken the message, so a failed send is retried.
+    [ "$sent" = 0 ] && cp "$R/findings.tsv" "$STATE/findings.tsv"
+    return $sent
+}
+
+digest() {
+    R="$STATE/run"
+    {
+        echo "**Images built more than $STALE_DAYS days ago, or on an end-of-life OS**"
+        echo
+        awk -F'\t' -v d="$STALE_DAYS" '
+            ($4 != "?" && $4 + 0 > d) || $6 == "EOL" || $4 == "?" {
+                printf "- %s (%s): built %s%s, %s %s\n", $1, $2,
+                    ($4 == "?" ? "date unknown" : $3), ($4 == "?" ? "" : ", " $4 " days ago"), $5, $6; n++ }
+            END { if (!n) print "- none" }' "$R/images.tsv"
+        echo
+        echo "**Exceptions due for review**"
+        echo
+        today=$(date +%Y-%m-%d)
+        if [ -f "$EXCEPTIONS" ]; then
+            grep -v '^[[:space:]]*\(#\|$\)' "$EXCEPTIONS" | while read -r pat review reason; do
+                [ "$(echo "$review" | tr -d -)" -le "$(echo "$today" | tr -d -)" ] 2>/dev/null \
+                    && echo "- $pat (review $review): $reason"
+            done
+        fi | grep . || echo "- none"
+        echo
+        echo "**Totals**"
+        echo
+        awk -F'\t' '{ split($1, k, "|"); c[$2]++; if ($6 == "1") e++; if (!(k[1] in img)) { img[k[1]]; n++ } }
+            END { printf "- %d CRITICAL, %d HIGH fixable across %d image(s), %d of them in excepted images\n",
+                  c["CRITICAL"], c["HIGH"], n, e }' "$STATE/findings.tsv"
+        mine=$(trivy --version 2>/dev/null | awk '/^Version:/ { print $2; exit }')
+        latest=$(curl -fsS -m 20 https://api.github.com/repos/aquasecurity/trivy/releases/latest \
+                 | jq -r '.tag_name + " " + (.published_at | .[0:10])' 2>/dev/null)
+        echo "- Trivy here: $mine; latest upstream: ${latest:-unknown} (take releases two weeks old or more)"
+    } >"$R/digest.md"
+    teams "Trivy $HOST_LABEL: weekly digest" "$R/digest.md"
+}
+
+run_once() {
+    log "scan starting"
+    hc /start
+    err=""
+    scan || err=$SCAN_ERR
+    # Without a container list there is nothing to compare: reporting would "resolve" everything.
+    if [ "$SCAN_FATAL" = 0 ]; then
+        report || err="${err:+$err; }Teams did not accept the alert"
+    fi
+    if [ "$SCAN_FATAL" = 0 ] && { [ "$(date +%u)" = "$DIGEST_DAY" ] || [ "$FORCE_DIGEST" = 1 ]; }; then
+        digest || err="${err:+$err; }Teams did not accept the digest"
+    fi
+    # advisory-watch.sh has no healthchecks.io check of its own; this one vouches for it.
+    if [ -n "$ADVISORY_HEARTBEAT" ] && [ -z "$(find "$ADVISORY_HEARTBEAT" -mmin -360 2>/dev/null)" ]; then
+        err="${err:+$err; }advisory-watch has not completed a round in 6 hours"
+    fi
+    if [ -n "$err" ]; then
+        log "run finished with problems: $err"
+        hc /fail "$err"
+    else
+        log "run finished"
+        hc "" "$(wc -l <"$STATE/findings.tsv") findings in scope"
+    fi
+}
+
+log "trivy-watch on $HOST_LABEL: daily at $RUN_AT, digest on day $DIGEST_DAY, dry run $DRY_RUN"
+[ "$RUN_ON_START" = 1 ] || [ "$ONESHOT" = 1 ] && run_once
+[ "$ONESHOT" = 1 ] && exit 0
+
+while :; do
+    now=$(date +%s)
+    next=$(date -d "$(date +%Y-%m-%d) $RUN_AT" +%s)
+    [ "$next" -gt "$now" ] || next=$((next + 86400))
+    sleep $((next - now)) & wait $!
+    run_once
+done

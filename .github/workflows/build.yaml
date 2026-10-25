@@ -9,22 +9,24 @@ on:
 permissions:
   contents: read
 
-env:
-  ADDON: komodo-periphery
-
 jobs:
   lint:
+    strategy:
+      matrix:
+        addon: [komodo-periphery, trivy-watch]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: frenck/action-addon-linter@v2
         with:
-          path: ./${{ env.ADDON }}
+          path: ./${{ matrix.addon }}
 
   build:
     needs: lint
     strategy:
       matrix:
+        addon: [komodo-periphery, trivy-watch]
+        arch: [amd64, aarch64]
         include:
           - arch: amd64
             runner: ubuntu-24.04
@@ -34,6 +36,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      ADDON: ${{ matrix.addon }}
     steps:
       - uses: actions/checkout@v7
 
@@ -45,6 +49,17 @@ jobs:
           # 2.3.3-r1 -> 2.3.3: the -rN suffix marks add-on-only changes.
           echo "upstream=${version%-r*}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER}/${ADDON}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+
+      # trivy-watch pins Trivy by tag and digest in its Dockerfile, so the add-on version can't
+      # drive the FROM line as a build arg. Renovate bumps both; this catches a half-done bump.
+      - name: Check the Dockerfile matches the version
+        if: matrix.addon == 'trivy-watch'
+        run: |
+          from="$(sed -n 's|^FROM aquasec/trivy:\([^@]*\)@.*|\1|p' "$ADDON/Dockerfile")"
+          if [ "$from" != "${{ steps.version.outputs.upstream }}" ]; then
+            echo "::error::Dockerfile is FROM aquasec/trivy:$from, config.yaml says ${{ steps.version.outputs.addon }}"
+            exit 1
+          fi
 
       - name: Log in to ghcr.io
         if: github.event_name != 'pull_request'
@@ -81,8 +96,17 @@ jobs:
       - name: Smoke test
         run: |
           image="${{ steps.version.outputs.image }}:${{ steps.version.outputs.addon }}"
-          docker run --rm --entrypoint haproxy "$image" -c -f /etc/haproxy/docker-ro.cfg
-          docker run --rm --entrypoint periphery "$image" --version
+          case "$ADDON" in
+            komodo-periphery)
+              docker run --rm --entrypoint haproxy "$image" -c -f /etc/haproxy/docker-ro.cfg
+              docker run --rm --entrypoint periphery "$image" --version
+              ;;
+            trivy-watch)
+              docker run --rm --entrypoint haproxy "$image" -c -f /etc/haproxy/scanner.cfg
+              docker run --rm --entrypoint trivy "$image" --version
+              docker run --rm --entrypoint sh "$image" -c 'bash -n /run.sh && sh -n /usr/local/bin/trivy-watch'
+              ;;
+          esac
 
       - name: Push
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.released.outputs.exists == 'false'

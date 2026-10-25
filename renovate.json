@@ -17,6 +17,20 @@
       "datasourceTemplate": "docker",
       "versioningTemplate": "semver",
       "autoReplaceStringTemplate": "version: \"{{{newValue}}}\""
+    },
+    {
+      "customType": "regex",
+      "description": "trivy-watch's add-on version is the Trivy version its Dockerfile is FROM (plus an optional -rN suffix, dropped on a bump)",
+      "managerFilePatterns": [
+        "/^trivy-watch/config\\.yaml$/"
+      ],
+      "matchStrings": [
+        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""
+      ],
+      "depNameTemplate": "aquasec/trivy",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+      "autoReplaceStringTemplate": "version: \"{{{newValue}}}\""
     }
   ],
   "packageRules": [
@@ -25,6 +39,15 @@
       "matchDepNames": [
         "ghcr.io/moghtech/komodo-periphery"
       ],
+      "automerge": false
+    },
+    {
+      "description": "Trivy: the Dockerfile's FROM and trivy-watch's add-on version move in one PR (CI fails if they disagree). Releases wait 14 days, since Trivy's own release pipeline was compromised in early 2026; the PR also needs a CHANGELOG entry",
+      "matchDepNames": [
+        "aquasec/trivy"
+      ],
+      "groupName": "Trivy",
+      "minimumReleaseAge": "14 days",
       "automerge": false
     },
     {

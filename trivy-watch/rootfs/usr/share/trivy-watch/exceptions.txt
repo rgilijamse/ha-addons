@@ -1,0 +1,5 @@
+# Images trivy-watch scans but never alerts on (trivy-watch.sh). One per line:
+#   <image reference, shell glob>  <review date YYYY-MM-DD>  <reason>
+# The weekly digest lists every entry whose review date has passed; re-decide it then, and either
+# move the date or delete the line. Matching is on the image reference as the container was created
+# with (Config.Image), so a pinned tag needs its glob to survive a bump.

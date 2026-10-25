@@ -1,0 +1,28 @@
+configuration:
+  teams_webhook_url:
+    name: Teams webhook URL
+    description: >-
+      Microsoft Teams incoming webhook that new findings and the weekly digest are sent to.
+      Required unless Dry run is on.
+  hc_ping_url:
+    name: healthchecks.io ping URL
+    description: >-
+      Ping URL of a healthchecks.io check for this host, without /start or /fail. Required unless
+      Dry run is on.
+  host_label:
+    name: Host label
+    description: Name of this host in Teams messages.
+  run_at:
+    name: Run at
+    description: Daily scan time, HH:MM in Home Assistant's time zone.
+  digest_day:
+    name: Digest day
+    description: Day of the weekly digest, 1 = Monday ... 7 = Sunday.
+  extra_env:
+    name: Extra environment
+    description: >-
+      KEY=VALUE settings passed to the scan script as they are, such as STALE_DAYS=90 or
+      RUN_ON_START=1. Shown in clear text, so never put a secret here.
+  dry_run:
+    name: Dry run
+    description: Log what would be sent to Teams instead of sending it, and ping nothing.
