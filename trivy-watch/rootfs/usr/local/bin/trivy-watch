@@ -171,7 +171,7 @@ report() {
     # Findings of an image whose scan failed this time are carried over from the previous state,
     # so they neither "resolve" now nor re-alert on the next good run.
     if [ -f "$R/failed.txt" ]; then
-        awk -F'\t' 'NR == FNR { f[$0]; next } { split($1, k, "|"); if (k[1] in f) print }' \
+        awk -F'\t' 'FILENAME == ARGV[1] { f[$0]; next } { split($1, k, "|"); if (k[1] in f) print }' \
             "$R/failed.txt" "$STATE/findings.tsv" >>"$R/findings.tsv"
         sort -u -o "$R/findings.tsv" "$R/findings.tsv"
     fi
@@ -182,16 +182,16 @@ report() {
     today=$(date +%Y-%m-%d)
     prev=$(date -r "$STATE/findings.tsv" +%Y-%m-%d)
     awk -F'\t' -v OFS='\t' -v today="$today" -v prev="$prev" '
-        NR == FNR { fs[$1] = ($7 != "" ? $7 : prev); next }
+        FILENAME == ARGV[1] { fs[$1] = ($7 != "" ? $7 : prev); next }
         { $7 = ($1 in fs ? fs[$1] : today); print }' \
         "$STATE/findings.tsv" "$R/findings.tsv" >"$R/findings.dated"
     mv "$R/findings.dated" "$R/findings.tsv"
 
-    awk -F'\t' 'NR == FNR { seen[$1]; next } !($1 in seen) && $6 != "1"' \
+    awk -F'\t' 'FILENAME == ARGV[1] { seen[$1]; next } !($1 in seen) && $6 != "1"' \
         "$STATE/findings.tsv" "$R/findings.tsv" >"$R/new.tsv"
     # Gone since the previous run: fixed by an image update, or the container was removed. Logged
     # only, so `docker logs trivy-watch | grep RESOLVED` is the history of fixes.
-    awk -F'\t' 'NR == FNR { cur[$1]; next } !($1 in cur)' \
+    awk -F'\t' 'FILENAME == ARGV[1] { cur[$1]; next } !($1 in cur)' \
         "$R/findings.tsv" "$STATE/findings.tsv" >"$R/resolved.tsv"
     total=$(wc -l <"$R/findings.tsv")
     new=$(wc -l <"$R/new.tsv")

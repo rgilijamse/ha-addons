@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.75.0-r2
+
+- Fixed: no finding was ever counted on a host whose saved state was empty, which is every new
+  install: the first run saved an empty baseline and every later run reported 0, without failing.
+  `trivy-watch.sh` from home-network-containers commit `502e954`. After updating, the next run
+  logs all current findings as new (and sends them, unless Dry run is on).
+
 ## 0.75.0-r1
 
 - Fixed: the add-on refused to start on hosts where the Docker socket's owner or group had the
