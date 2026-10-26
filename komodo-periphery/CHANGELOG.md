@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.4
+
+- Periphery 2.3.4. Upstream's only change bumps webpki-roots to drop the eMudhra root after an
+  intermediate key compromise. Komodo Core reports a version mismatch until the agent matches it.
+
 ## 2.3.3-r4
 
 - Container logs work in Komodo. Periphery fetches logs with `docker logs`, which inspects the
