@@ -70,7 +70,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Releases are immutable: a version already in the registry is never overwritten, so
-      # Supervisor never has a stale copy of a tag. Bump the version to release a change.
+      # Supervisor never has a stale copy of a tag. Bump the version to release a change. The one
+      # moving tag is `latest`, below.
       - name: Check whether this version is already released
         id: released
         if: github.event_name != 'pull_request'
@@ -111,3 +112,12 @@ jobs:
       - name: Push
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.released.outputs.exists == 'false'
         run: docker push "${{ steps.version.outputs.image }}:${{ steps.version.outputs.addon }}"
+
+      # `latest` follows the version in config.yaml on main, for running the image outside
+      # Supervisor. It is copied in the registry from the released version tag rather than pushed
+      # from this build, so it is always that release's image, also on a run that released nothing.
+      - name: Point latest at this version
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          image="${{ steps.version.outputs.image }}"
+          docker buildx imagetools create --tag "$image:latest" "$image:${{ steps.version.outputs.addon }}"
