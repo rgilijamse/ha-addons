@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.76.0-r1
+
+- Changed: no more daily message per new finding. Teams now gets a finding right away only when
+  its CVE is on CISA's Known Exploited Vulnerabilities list, and the weekly digest gains a list of
+  images still carrying a fixable finding 30 days after it first showed up, one line per image.
+  New and resolved findings are still logged. A missing KEV list (no download for 3 days) fails
+  the healthchecks.io check.
+- `trivy-watch.sh` from home-network-containers commit `66e9ef9`. After updating, the first
+  run sends any known exploited finding already present, once.
+
 ## 0.75.0-r2
 
 - Fixed: no finding was ever counted on a host whose saved state was empty, which is every new

@@ -8,20 +8,32 @@
 # postgres/mysql image) that only an upstream rebuild can fix. So:
 #   - only fixable findings (--ignore-unfixed), only HIGH and CRITICAL;
 #   - gosu skipped outright (SKIP_FILES), and HIGH findings in Go's stdlib dropped (CRITICAL kept);
-#   - only what is NEW since the previous run goes to Teams, keyed on image reference + CVE +
-#     package, so a nightly re-pull of an image with the same finding doesn't re-alert. Bumping a
-#     pinned tag does re-alert whatever the new tag still carries -- intended;
-#   - images matching exceptions.txt are scanned and kept in state but never alerted on.
+#   - kernel header packages (linux-libc-dev, linux-headers-*) dropped: in an image they are only
+#     headers, the kernel is the host's. Their kernel CVEs matched KEV on the first test run;
+#   - images matching exceptions.txt are scanned and kept in state but left out of the digest.
+#
+# Teams only hears about what asks for a decision. A new fixable CVE in an upstream image doesn't:
+# the fix is the upstream rebuild, which auto-update already pulls. Until 2026-10-30 every new
+# finding went to Teams daily and went unread, so now:
+#   - daily, only a finding whose CVE is on CISA's Known Exploited Vulnerabilities list (KEV),
+#     once per finding, excepted images included: someone is using it, so for an image reachable
+#     from outside, stopping the container until upstream ships the fix is on the table. A CVE
+#     added to KEV later alerts then. The feed is cached in state; the run fails the healthchecks
+#     check once the cache is older than KEV_MAX_AGE days;
+#   - weekly, the digest (below).
 # History lives in the container log, not in Teams: every new finding is logged as NEW, every one
 # that disappeared (image fixed upstream, or container removed) as RESOLVED with the date it was
 # first seen, which state keeps per finding. `docker logs trivy-watch | grep RESOLVED`.
-# The first run (no state yet) only records a baseline and sends nothing.
 #
-# Weekly digest (DIGEST_DAY, after the scan): running images built more than STALE_DAYS ago or on
-# an end-of-life OS -- the "maintainer stopped rebuilding" signal that a CVE diff can't give --
-# plus exceptions past their review date, and whether this Trivy is behind upstream. Trivy is
-# pinned by digest where it is deployed, so nothing updates it but a deliberate bump; take
-# releases at least two weeks old (its own release pipeline was compromised in early 2026).
+# Weekly digest (DIGEST_DAY, after the scan), each line a decision:
+#   - images with findings first seen more than OVERDUE_DAYS ago: a fix exists (only fixable
+#     findings are tracked) and the image still carries it, so upstream isn't shipping it or the
+#     update path is broken. Update or replace the image, or add an exception. One line per image
+#     with counts, not one per CVE, so the message never needs truncating;
+#   - running images built more than STALE_DAYS ago or on an end-of-life OS -- the "maintainer
+#     stopped rebuilding" signal that a CVE diff can't give;
+#   - exceptions past their review date, and whether this Trivy is behind upstream (take releases
+#     at least two weeks old: its own release pipeline was compromised in early 2026).
 #
 # Known blind spot: images built on the official php images get PHP compiled from source, so
 # Trivy never sees a PHP version there. That's what the advisory feed is for.
@@ -48,7 +60,9 @@ RUN_ON_START=${RUN_ON_START:-0}      # 1: run once immediately, then follow the 
 ONESHOT=${ONESHOT:-0}                # 1: run once and exit (testing)
 FORCE_DIGEST=${FORCE_DIGEST:-0}      # 1: send the digest on every run (testing)
 SKIP_FILES=${SKIP_FILES:-/usr/local/bin/gosu /usr/sbin/gosu /usr/bin/gosu}
-MAX_LINES=${MAX_LINES:-40}           # findings listed in one Teams message; the rest are counted
+OVERDUE_DAYS=${OVERDUE_DAYS:-30}     # digest: findings open longer than this
+KEV_URL=${KEV_URL-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
+KEV_MAX_AGE=${KEV_MAX_AGE:-3}        # days a cached KEV feed may be used when the download fails
 TEAMS_WEBHOOK_URL=${TEAMS_WEBHOOK_URL:-}
 HC_PING_URL=${HC_PING_URL:-}
 ADVISORY_HEARTBEAT=${ADVISORY_HEARTBEAT:-}   # advisory-watch.sh's last-ok file, where it runs
@@ -143,7 +157,8 @@ scan() {
         # report() adds column 7, the date the finding was first seen.
         jq -r --arg ref "$ref" --arg exc "${exc:+1}" '
             [.Results[]? | .Vulnerabilities[]?
-             | select(.Severity == "CRITICAL" or .PkgName != "stdlib")]
+             | select(.Severity == "CRITICAL" or .PkgName != "stdlib")
+             | select(.PkgName | test("^linux-(libc-dev|headers)") | not)]
             | unique_by(.VulnerabilityID + "|" + .PkgName)[]
             | [$ref + "|" + .VulnerabilityID + "|" + .PkgName, .Severity, .InstalledVersion,
                .FixedVersion, ((.Title // "") | .[0:90]), $exc]
@@ -201,32 +216,79 @@ report() {
         '{ printf "    RESOLVED %s %s (open %s to %s)\n", $2, $1, ($7 != "" ? $7 : prev), today }' \
         "$R/resolved.tsv"
 
-    sent=0
     if [ "$first" = 1 ]; then
-        log "first run: baseline of $total finding(s) recorded, nothing sent"
-    elif [ "$new" -gt 0 ]; then
-        # Grouped per image, CRITICAL first; full list in the container log.
-        sort -t "$(printf '\t')" -k2,2 -k1,1 "$R/new.tsv" | awk -F'\t' -v max="$MAX_LINES" '
-            { split($1, k, "|")
-              if (n < max) {
-                  if (k[1] != last) { printf "%s**%s**\n\n", (n ? "\n" : ""), k[1]; last = k[1] }
-                  printf "- %s %s %s %s -> %s: %s\n", $2, k[2], k[3], $3, $4, $5
-              }
-              n++ }
-            END { if (n > max) printf "\n...and %d more, see docker logs trivy-watch\n", n - max }
-        ' >"$R/new.md"
+        log "first run: baseline of $total finding(s) recorded"
+    else
         awk -F'\t' '{ printf "    NEW %s %s %s -> %s: %s\n", $2, $1, $3, $4, $5 }' "$R/new.tsv"
-        teams "Trivy $HOST_LABEL: $new new fixable vulnerabilit$([ "$new" = 1 ] && echo y || echo ies)" \
-            "$R/new.md" || sent=1
     fi
-    # Advance the state only once Teams has taken the message, so a failed send is retried.
-    [ "$sent" = 0 ] && cp "$R/findings.tsv" "$STATE/findings.tsv"
-    return $sent
+    cp "$R/findings.tsv" "$STATE/findings.tsv"
+}
+
+# Alerts once per finding whose CVE is on CISA's KEV list; returns non-zero if the feed is too old
+# or Teams didn't take the alert (KEV_ERR says which). Alerted keys live in $STATE/kev-alerted.txt,
+# pruned to the current findings, so a finding that resolves and comes back alerts again.
+kev() {
+    R="$STATE/run"
+    KEV_ERR=""
+    [ -n "$KEV_URL" ] || return 0
+    if curl -fsS -m 60 --retry 3 "$KEV_URL" | jq -r '.vulnerabilities[].cveID' >"$R/kev.tmp" \
+            && [ -s "$R/kev.tmp" ]; then
+        mv "$R/kev.tmp" "$STATE/kev.txt"
+    else
+        log "KEV feed download failed"
+        if [ -z "$(find "$STATE/kev.txt" -mtime -"$KEV_MAX_AGE" 2>/dev/null)" ]; then
+            KEV_ERR="KEV feed not downloaded for $KEV_MAX_AGE days"; return 1
+        fi
+    fi
+    touch "$STATE/kev-alerted.txt"
+    awk -F'\t' 'FILENAME == ARGV[1] { kev[$1]; next } { split($1, k, "|"); if (k[2] in kev) print }' \
+        "$STATE/kev.txt" "$STATE/findings.tsv" >"$R/kev-hits.tsv"
+    awk -F'\t' 'FILENAME == ARGV[1] { done[$1]; next } !($1 in done)' \
+        "$STATE/kev-alerted.txt" "$R/kev-hits.tsv" >"$R/kev-new.tsv"
+    n=$(wc -l <"$R/kev-new.tsv")
+    if [ "$n" -gt 0 ]; then
+        sort -t "$(printf '\t')" -k1,1 "$R/kev-new.tsv" | awk -F'\t' '
+            { split($1, k, "|")
+              if (k[1] != last) { printf "%s**%s**\n\n", (n++ ? "\n" : ""), k[1]; last = k[1] }
+              printf "- %s %s %s %s -> %s: %s%s\n", $2, k[2], k[3], $3, $4, $5,
+                  ($6 == "1" ? " (excepted image)" : "") }' >"$R/kev.md"
+        awk -F'\t' '{ printf "    KEV %s %s\n", $2, $1 }' "$R/kev-new.tsv"
+        if ! teams "Trivy $HOST_LABEL: $n known exploited vulnerabilit$([ "$n" = 1 ] && echo y || echo ies)" \
+                "$R/kev.md"; then
+            KEV_ERR="Teams did not accept the KEV alert"; return 1
+        fi
+    fi
+    # Only once Teams has the alert, so a failed send is retried on the next run.
+    cut -f1 "$R/kev-hits.tsv" | sort -u >"$STATE/kev-alerted.txt"
 }
 
 digest() {
     R="$STATE/run"
+    today=$(date +%Y-%m-%d)
+    cutoff=$(date -d "@$(( $(date +%s) - OVERDUE_DAYS * 86400 ))" +%Y-%m-%d)
     {
+        echo "**Fix available for more than $OVERDUE_DAYS days, image still affected**"
+        echo
+        # Per image: counts, the oldest first-seen date and up to three package names. Containers
+        # from this run's images.tsv; excepted images left out.
+        awk -F'\t' -v cutoff="$cutoff" '
+            FILENAME == ARGV[1] { names[$1] = $2; next }
+            $6 != "1" && $7 != "" && $7 < cutoff {
+                split($1, k, "|"); i = k[1]
+                if (!(i in tot)) order[++n] = i
+                tot[i]++; if ($2 == "CRITICAL") crit[i]++
+                if (!(i in old) || $7 < old[i]) old[i] = $7
+                if (!((i, k[3]) in seen)) { seen[i, k[3]]; np[i]++
+                    if (np[i] <= 3) pk[i] = pk[i] (np[i] > 1 ? ", " : "") k[3] }
+            }
+            END {
+                for (j = 1; j <= n; j++) { i = order[j]
+                    printf "%d\t- %s (%s): %d CRITICAL, %d HIGH, open since %s; %s%s\n",
+                        crit[i] + 0, i, (i in names ? names[i] : "-"), crit[i], tot[i] - crit[i],
+                        old[i], pk[i], (np[i] > 3 ? " and " np[i] - 3 " more" : "") }
+                if (!n) print "0\t- none"
+            }' "$R/images.tsv" "$STATE/findings.tsv" | sort -t "$(printf '\t')" -k1,1nr -k2 | cut -f2-
+        echo
         echo "**Images built more than $STALE_DAYS days ago, or on an end-of-life OS**"
         echo
         awk -F'\t' -v d="$STALE_DAYS" '
@@ -237,7 +299,6 @@ digest() {
         echo
         echo "**Exceptions due for review**"
         echo
-        today=$(date +%Y-%m-%d)
         if [ -f "$EXCEPTIONS" ]; then
             grep -v '^[[:space:]]*\(#\|$\)' "$EXCEPTIONS" | while read -r pat review reason; do
                 [ "$(echo "$review" | tr -d -)" -le "$(echo "$today" | tr -d -)" ] 2>/dev/null \
@@ -265,7 +326,8 @@ run_once() {
     scan || err=$SCAN_ERR
     # Without a container list there is nothing to compare: reporting would "resolve" everything.
     if [ "$SCAN_FATAL" = 0 ]; then
-        report || err="${err:+$err; }Teams did not accept the alert"
+        report
+        kev || err="${err:+$err; }$KEV_ERR"
     fi
     if [ "$SCAN_FATAL" = 0 ] && { [ "$(date +%u)" = "$DIGEST_DAY" ] || [ "$FORCE_DIGEST" = 1 ]; }; then
         digest || err="${err:+$err; }Teams did not accept the digest"

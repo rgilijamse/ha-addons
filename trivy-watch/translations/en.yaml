@@ -2,7 +2,7 @@ configuration:
   teams_webhook_url:
     name: Teams webhook URL
     description: >-
-      Microsoft Teams incoming webhook that new findings and the weekly digest are sent to.
+      Microsoft Teams incoming webhook that known exploited findings and the weekly digest are sent to.
       Required unless Dry run is on.
   hc_ping_url:
     name: healthchecks.io ping URL
