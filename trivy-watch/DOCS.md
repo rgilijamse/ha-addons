@@ -3,14 +3,18 @@
 Scans every image a running container on this host uses, once a day, with
 [Trivy](https://trivy.dev), and reports to a Microsoft Teams channel:
 
-- **New findings only.** Fixable HIGH and CRITICAL vulnerabilities that weren't there in the
-  previous scan. The first scan records a baseline and sends nothing.
-- **A weekly digest** of images built more than 60 days ago or on an end-of-life OS, exceptions
-  due for review, totals, and whether a newer Trivy is out.
+- **Daily, only known exploited vulnerabilities.** A fixable HIGH or CRITICAL finding whose CVE
+  is on [CISA's Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+  list, sent once per finding. Someone is using it, so for an add-on reachable from outside,
+  stopping it until a fixed version is out is worth considering.
+- **A weekly digest** of what needs a decision: images still carrying a fixable finding 30 days
+  after it first showed up (one line per image), images built more than 60 days ago or on an
+  end-of-life OS, exceptions due for review, totals, and whether a newer Trivy is out.
 
-Most findings in add-on images can only be fixed by the add-on's maintainer, so a finding usually
-means "update the add-on when a new version is out", and the digest tells you which add-ons have
-stopped getting new versions. Findings that have disappeared are logged as `RESOLVED`, so the
+Most findings in add-on images can only be fixed by the add-on's maintainer, so a new finding on
+its own means "update the add-on when a new version is out", which needs no message. One that is
+still there a month later means the maintainer isn't shipping the fix, or the add-on isn't being
+updated. Every new finding is logged as `NEW` and every one that disappeared as `RESOLVED`, so the
 add-on log is the history.
 
 The scan logic is `trivy-watch.sh`, copied unchanged from the setup that scans other Docker hosts.
@@ -37,9 +41,10 @@ Trivy and the scan script run as an unprivileged user that can reach only the pr
 capabilities and with only the settings below in their environment. The add-on checks on every
 start that this user can't open the real Docker socket, and refuses to run if it can.
 
-**What leaves the host:** new findings and the digest to your Teams webhook, a start, success or
+**What leaves the host:** known exploited findings and the digest to your Teams webhook, a start, success or
 failure ping per scan to your healthchecks.io check, and Trivy's own downloads of its
-vulnerability database (from `mirror.gcr.io`) and of the latest release number (from GitHub).
+vulnerability database (from `mirror.gcr.io`), of the latest release number (from GitHub) and of
+CISA's list of known exploited vulnerabilities (from `www.cisa.gov`).
 Nothing listens on this host.
 
 ## Requirements
@@ -82,7 +87,8 @@ shows the scan and the message it would have sent.
 
 Images you have decided to live with go in `exceptions.txt` in this add-on's folder of
 `addon_configs` (reachable with the Samba or File editor add-on). They are still scanned, but
-never alerted on, and the weekly digest lists each one when its review date has passed:
+left out of the digest's overdue list (a known exploited finding is still sent), and the weekly
+digest lists each one when its review date has passed:
 
 ```
 # <image reference, shell glob>  <review date YYYY-MM-DD>  <reason>
@@ -93,7 +99,7 @@ The add-on creates the file, with this format in its header, on its first start.
 
 ## Log
 
-The scan script logs each run, every new finding (`NEW`) and every finding that disappeared
-(`RESOLVED`, with the date it was first seen). The proxy logs every refused Docker call as a `403`
+The scan script logs each run, every new finding (`NEW`), every finding that disappeared
+(`RESOLVED`, with the date it was first seen) and every known exploited finding it sent (`KEV`). The proxy logs every refused Docker call as a `403`
 line, except one expected refusal per image per scan: Trivy first looks an image ID up as if it
 were a Docker Hub name, and only uses the plain ID after that fails.

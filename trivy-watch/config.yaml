@@ -2,9 +2,9 @@
 # for add-on-only changes, a new copy of trivy-watch.sh included (0.75.0, then 0.75.0-r1, ...).
 # Renovate bumps this line and the Dockerfile's FROM together; CI fails if the two disagree.
 name: Trivy watch
-version: "0.76.0"
+version: "0.76.0-r1"
 slug: trivy_watch
-description: Daily vulnerability scan of this host's add-on images, new findings sent to Teams
+description: Daily vulnerability scan of this host's add-on images, what needs a decision sent to Teams
 url: https://github.com/rgilijamse/ha-addons/tree/main/trivy-watch
 arch:
   - amd64
