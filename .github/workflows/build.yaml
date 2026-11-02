@@ -13,7 +13,7 @@ jobs:
   lint:
     strategy:
       matrix:
-        addon: [komodo-periphery, trivy-watch]
+        addon: [komodo-periphery, trivy-watch, ecowitt-proxy]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -25,7 +25,7 @@ jobs:
     needs: lint
     strategy:
       matrix:
-        addon: [komodo-periphery, trivy-watch]
+        addon: [komodo-periphery, trivy-watch, ecowitt-proxy]
         arch: [amd64, aarch64]
         include:
           - arch: amd64
@@ -58,6 +58,16 @@ jobs:
           from="$(sed -n 's|^FROM aquasec/trivy:\([^@]*\)@.*|\1|p' "$ADDON/Dockerfile")"
           if [ "$from" != "${{ steps.version.outputs.upstream }}" ]; then
             echo "::error::Dockerfile is FROM aquasec/trivy:$from, config.yaml says ${{ steps.version.outputs.addon }}"
+            exit 1
+          fi
+
+      # Same for ecowitt-proxy and its python base image (tag 3.14.10-alpine3.24 for version 3.14.10).
+      - name: Check the Dockerfile matches the version
+        if: matrix.addon == 'ecowitt-proxy'
+        run: |
+          from="$(sed -n 's|^FROM python:\([0-9.]*\)-alpine[0-9.]*@.*|\1|p' "$ADDON/Dockerfile")"
+          if [ "$from" != "${{ steps.version.outputs.upstream }}" ]; then
+            echo "::error::Dockerfile is FROM python:$from, config.yaml says ${{ steps.version.outputs.addon }}"
             exit 1
           fi
 
@@ -106,6 +116,11 @@ jobs:
               docker run --rm --entrypoint haproxy "$image" -c -f /etc/haproxy/scanner.cfg
               docker run --rm --entrypoint trivy "$image" --version
               docker run --rm --entrypoint sh "$image" -c 'bash -n /run.sh && sh -n /usr/local/bin/trivy-watch'
+              ;;
+            ecowitt-proxy)
+              # End to end against a stand-in webhook; see the test file for what it covers.
+              docker run --rm -v "$PWD/$ADDON/tests:/tests:ro" --entrypoint python3 "$image" \
+                -W error::ResourceWarning /tests/test_proxy.py
               ;;
           esac
 

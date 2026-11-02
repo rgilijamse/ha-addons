@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Receives an Ecowitt station's "customized" uploads over plain HTTP and forwards them, unchanged,
+to the Ecowitt integration's webhook in Home Assistant.
+
+Ecowitt consoles can only send plain HTTP; a Home Assistant that only serves HTTPS can't take
+them directly. Supervisor's internal API (http://supervisor/core) can, with this add-on's
+SUPERVISOR_TOKEN.
+
+Python standard library only: no pip packages to fall behind on CVEs.
+"""
+
+import json
+import logging
+import os
+import signal
+import sys
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+OPTIONS_FILE = os.environ.get("OPTIONS_FILE", "/data/options.json")
+# Overridable for tests; inside Supervisor the default is the only sensible value.
+WEBHOOK_BASE = os.environ.get("WEBHOOK_BASE", "http://supervisor/core/api/webhook/")
+LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
+UPLOAD_PATH = "/log/ha"
+MAX_BODY = 64 * 1024  # a full station upload is about 1 KiB
+FORWARD_TIMEOUT = 10
+NOBODY = 65534
+
+log = logging.getLogger("ecowitt-proxy")
+
+
+class Forwarder:
+    """Forwards a body to the webhook; logs only changes between working and failing at INFO, so
+    a healthy station doesn't write a log line every minute."""
+
+    def __init__(self, url, token):
+        self.url = url
+        self.token = token
+        self.healthy = None
+
+    def forward(self, body, content_type):
+        request = urllib.request.Request(self.url, data=body, method="POST")
+        request.add_header("Content-Type", content_type)
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
+        try:
+            with urllib.request.urlopen(request, timeout=FORWARD_TIMEOUT) as response:
+                response.read()
+                status = response.status
+        except urllib.error.HTTPError as err:
+            status = err.code
+            self._failed(f"Home Assistant answered HTTP {status}")
+            return status
+        except (urllib.error.URLError, OSError) as err:
+            self._failed(f"Home Assistant unreachable: {getattr(err, 'reason', err)}")
+            return None
+        if self.healthy is not True:
+            log.info("Forwarding to Home Assistant works")
+        self.healthy = True
+        return status
+
+    def _failed(self, message):
+        if self.healthy is not False:
+            log.error("%s; forwarding is failing", message)
+        else:
+            log.debug(message)
+        self.healthy = False
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "ecowitt-proxy"
+    sys_version = ""
+    timeout = 15  # per connection, so a stalled client can't hold a thread forever
+    forwarder = None  # set in main()
+
+    def do_GET(self):
+        if self.path == "/":
+            self._reply(200, "Home Assistant Ecowitt proxy\n")
+        elif self.path.split("?", 1)[0] == UPLOAD_PATH:
+            self._reply(405, "Requires POST\n")
+        else:
+            self._reply(404, "Not found\n")
+
+    def do_POST(self):
+        if self.path.split("?", 1)[0] != UPLOAD_PATH:
+            self._reply(404, "Not found\n")
+            return
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self._reply(411, "Content-Length required\n")
+            return
+        if length < 0 or length > MAX_BODY:
+            self._reply(413, "Too large\n")
+            return
+        body = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type", "application/x-www-form-urlencoded")
+        log.debug("Upload from %s: %d bytes", self.client_address[0], len(body))
+        status = self.forwarder.forward(body, content_type)
+        if status == 200:
+            self._reply(200, "OK\n")
+        else:
+            self._reply(502, "Home Assistant did not accept the upload\n")
+
+    def _reply(self, status, text):
+        data = text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, fmt, *args):
+        log.debug("%s %s", self.client_address[0], fmt % args)
+
+
+def drop_privileges():
+    """Runs as nobody once the options are read: nothing after this needs root."""
+    if os.getuid() != 0:
+        return
+    os.setgroups([])
+    os.setgid(NOBODY)
+    os.setuid(NOBODY)
+
+
+def main():
+    try:
+        with open(OPTIONS_FILE, encoding="utf-8") as fh:
+            options = json.load(fh)
+    except (OSError, ValueError) as err:
+        print(f"[ERROR] Can't read {OPTIONS_FILE}: {err}", file=sys.stderr)
+        return 1
+
+    level = str(options.get("log_level", "info")).upper()
+    logging.basicConfig(
+        stream=sys.stdout,
+        level=getattr(logging, level, logging.INFO),
+        format="%(asctime)s %(levelname)-7s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    webhook_id = str(options.get("webhook_id", "")).strip()
+    if not webhook_id:
+        log.error("webhook_id is not set")
+        return 1
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        log.warning("SUPERVISOR_TOKEN is not set; Home Assistant will refuse the uploads")
+
+    Handler.forwarder = Forwarder(WEBHOOK_BASE + webhook_id, token)
+    server = ThreadingHTTPServer(("", LISTEN_PORT), Handler)
+    server.daemon_threads = True
+    drop_privileges()
+    # As PID 1 (no init) SIGTERM would otherwise be ignored and stopping waits for SIGKILL.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+    # The webhook ID itself is never logged: anyone who has it can post into the integration.
+    log.info("Listening on port %d for uploads to %s", LISTEN_PORT, UPLOAD_PATH)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

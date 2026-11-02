@@ -1,0 +1,14 @@
+configuration:
+  webhook_id:
+    name: Webhook ID
+    description: >-
+      The 32-character webhook ID the Ecowitt integration showed when it was set up: only the ID,
+      without /api/webhook/. Anyone who has it can post data into the integration.
+  log_level:
+    name: Log level
+    description: >-
+      At info, only start-up and changes between forwarding working and failing are logged.
+      Debug logs every upload.
+network:
+  8080/tcp: >-
+    Port the station uploads to. Set the same port in the station's customized upload settings.
