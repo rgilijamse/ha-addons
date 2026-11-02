@@ -47,43 +47,105 @@ class Webhook(BaseHTTPRequestHandler):
         pass
 
 
-class ProxyTest(unittest.TestCase):
+class Proxy:
+    """Runs the proxy against a stand-in webhook and collects its log as it goes."""
+
+    def __init__(self, webhook_port, log_level="debug", **env):
+        self.tmp = tempfile.TemporaryDirectory()
+        options = os.path.join(self.tmp.name, "options.json")
+        with open(options, "w") as fh:
+            json.dump({"webhook_id": WEBHOOK_ID, "log_level": log_level}, fh)
+        self.port = free_port()
+        self.lines = []
+        full_env = dict(
+            os.environ,
+            OPTIONS_FILE=options,
+            WEBHOOK_BASE=f"http://127.0.0.1:{webhook_port}/api/webhook/",
+            LISTEN_PORT=str(self.port),
+            SUPERVISOR_TOKEN=TOKEN,
+            **env,
+        )
+        self.proc = subprocess.Popen([PROXY], env=full_env, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True)
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and self.proc.poll() is None:
+            try:
+                socket.create_connection(("127.0.0.1", self.port), timeout=0.2).close()
+                return
+            except OSError:
+                time.sleep(0.1)
+        code = self.proc.poll()
+        self.proc.kill()
+        self.proc.wait()
+        self.reader.join(timeout=5)
+        self.proc.stdout.close()
+        self.tmp.cleanup()
+        raise RuntimeError(f"proxy did not start (exit code {code}):\n{self.output}")
+
+    def _read(self):
+        for line in self.proc.stdout:
+            self.lines.append(line.rstrip("\n"))
+
+    @property
+    def output(self):
+        return "\n".join(self.lines)
+
+    def wait_for(self, text, timeout=10):
+        """The first log line containing text, waiting up to timeout seconds for it."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for line in list(self.lines):
+                if text in line:
+                    return line
+            time.sleep(0.05)
+        raise AssertionError(f"no log line with {text!r} in:\n{self.output}")
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait(timeout=5)
+        self.reader.join(timeout=5)
+        self.proc.stdout.close()
+        self.tmp.cleanup()
+        # The webhook ID must never reach the log.
+        assert WEBHOOK_ID not in self.output, self.output
+
+
+def post(port, body=SAMPLE):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/log/ha", data=body, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status
+    except urllib.error.HTTPError as err:
+        with err:
+            return err.code
+
+
+class WebhookTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.webhook = ThreadingHTTPServer(("127.0.0.1", 0), Webhook)
         threading.Thread(target=cls.webhook.serve_forever, daemon=True).start()
-        cls.tmp = tempfile.TemporaryDirectory()
-        options = os.path.join(cls.tmp.name, "options.json")
-        with open(options, "w") as fh:
-            json.dump({"webhook_id": WEBHOOK_ID, "log_level": "debug"}, fh)
-        cls.port = free_port()
-        env = dict(
-            os.environ,
-            OPTIONS_FILE=options,
-            WEBHOOK_BASE=f"http://127.0.0.1:{cls.webhook.server_port}/api/webhook/",
-            LISTEN_PORT=str(cls.port),
-            SUPERVISOR_TOKEN=TOKEN,
-        )
-        cls.proc = subprocess.Popen([PROXY], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        for _ in range(50):
-            try:
-                socket.create_connection(("127.0.0.1", cls.port), timeout=0.2).close()
-                break
-            except OSError:
-                time.sleep(0.1)
-        else:
-            cls.proc.kill()
-            raise RuntimeError("proxy did not start: " + cls.proc.stdout.read().decode())
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate()
-        cls.output = cls.proc.communicate(timeout=5)[0].decode()
         cls.webhook.shutdown()
         cls.webhook.server_close()
-        cls.tmp.cleanup()
-        # The webhook ID must never reach the log.
-        assert WEBHOOK_ID not in cls.output, cls.output
+
+
+class ProxyTest(WebhookTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.proxy = Proxy(cls.webhook.server_port)
+        cls.port = cls.proxy.port
+        cls.proc = cls.proxy.proc
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proxy.stop()
+        super().tearDownClass()
 
     def setUp(self):
         Webhook.received.clear()
@@ -134,6 +196,64 @@ class ProxyTest(unittest.TestCase):
         with open(f"/proc/{self.proc.pid}/status") as fh:
             uid_line = next(line for line in fh if line.startswith("Uid:"))
         self.assertEqual(uid_line.split()[1:], ["65534"] * 4)
+
+
+
+class LogTest(WebhookTestCase):
+    """What an operator sees at INFO: first upload, failing/working changes, summaries, and the
+    station going quiet. Timings are shortened through the test-only environment variables."""
+
+    def setUp(self):
+        Webhook.received.clear()
+        Webhook.status = 200
+
+    def start(self, **env):
+        proxy = Proxy(self.webhook.server_port, log_level="info", CHECK_INTERVAL="0.1", **env)
+        self.addCleanup(proxy.stop)
+        return proxy
+
+    def test_first_upload_failures_recovery_and_summary(self):
+        proxy = self.start(SUMMARY_INTERVAL="3", STALE_AFTER_SECONDS="0")
+        self.assertEqual(post(proxy.port), 200)
+        proxy.wait_for("First upload since start, from 127.0.0.1: forwarded to Home Assistant")
+        self.assertEqual(post(proxy.port), 200)
+        Webhook.status = 401
+        self.assertEqual(post(proxy.port), 502)
+        self.assertEqual(post(proxy.port), 502)
+        proxy.wait_for("ERROR   Forwarding is failing: Home Assistant answered HTTP 401")
+        Webhook.status = 200
+        self.assertEqual(post(proxy.port), 200)
+        proxy.wait_for("Forwarding to Home Assistant works again")
+        proxy.wait_for("Last 3 seconds: 5 uploads from 127.0.0.1, 3 forwarded, 2 not")
+        proxy.wait_for("Last 3 seconds: no uploads")
+        # One failure line for two failed uploads; no line per upload at INFO.
+        self.assertEqual(proxy.output.count("Forwarding is failing"), 1, proxy.output)
+        self.assertNotIn("Warning when no upload", proxy.output)  # 0 turns the warning off
+
+    def test_first_upload_refused(self):
+        Webhook.status = 500
+        proxy = self.start()
+        self.assertEqual(post(proxy.port), 502)
+        proxy.wait_for("ERROR   First upload since start, from 127.0.0.1: not forwarded "
+                       "(Home Assistant answered HTTP 500)")
+
+    def test_no_upload_since_start(self):
+        proxy = self.start(STALE_AFTER_SECONDS="1")
+        proxy.wait_for("WARNING No upload in the 1 second since start; check the station's "
+                       "customized upload settings")
+        self.assertEqual(post(proxy.port), 200)
+        proxy.wait_for("Uploads resumed after")
+        proxy.wait_for("First upload since start")
+
+    def test_station_goes_quiet_and_comes_back(self):
+        proxy = self.start(STALE_AFTER_SECONDS="1")
+        self.assertEqual(post(proxy.port), 200)
+        proxy.wait_for("WARNING No upload for 1 second; check the station")
+        self.assertEqual(post(proxy.port), 200)
+        proxy.wait_for("INFO    Uploads resumed after 1 second")
+        # Warned once per quiet spell, not on every check.
+        time.sleep(0.5)
+        self.assertEqual(proxy.output.count("No upload for"), 1, proxy.output)
 
 
 if __name__ == "__main__":

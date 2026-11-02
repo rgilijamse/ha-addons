@@ -13,7 +13,8 @@ upload and hands it, unchanged, to the integration's webhook.
 - Python standard library only, on a pinned official `python` Alpine image without pip: nothing
   extra to collect CVEs.
 - A mapped port rather than host networking, and the receiver runs as `nobody`.
-- Logs only when forwarding starts or stops working, not every upload.
+- Logs the first upload after start, an hourly summary, and a warning when the station goes
+  quiet, not every upload.
 
 See the **Documentation** tab for setup.
 

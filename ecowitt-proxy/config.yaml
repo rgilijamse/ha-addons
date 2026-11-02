@@ -3,7 +3,7 @@
 # 3.14.10-r1, ...). Renovate bumps this line and the Dockerfile's FROM together; CI fails if the two
 # disagree.
 name: Ecowitt proxy
-version: "3.14.10"
+version: "3.14.10-r1"
 slug: ecowitt_proxy
 description: Takes an Ecowitt station's plain-HTTP uploads and hands them to the Ecowitt integration
 url: https://github.com/rgilijamse/ha-addons/tree/main/ecowitt-proxy
@@ -23,7 +23,9 @@ ports_description:
   8080/tcp: Ecowitt uploads (plain HTTP)
 options:
   webhook_id: ""
+  stale_after_minutes: 10
   log_level: info
 schema:
   webhook_id: password
+  stale_after_minutes: int(0,1440)
   log_level: list(debug|info|warning|error)

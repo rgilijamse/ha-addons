@@ -4,11 +4,16 @@ configuration:
     description: >-
       The 32-character webhook ID the Ecowitt integration showed when it was set up: only the ID,
       without /api/webhook/. Anyone who has it can post data into the integration.
+  stale_after_minutes:
+    name: Warn after quiet minutes
+    description: >-
+      Log a warning when no upload has arrived for this many minutes, and a line when uploads
+      resume. A station uploads about every minute. 0 turns the warning off.
   log_level:
     name: Log level
     description: >-
-      At info, only start-up and changes between forwarding working and failing are logged.
-      Debug logs every upload.
+      At info: start-up, the first upload, changes between forwarding working and failing, an
+      hourly summary and the quiet-station warning. Debug also logs every upload.
 network:
   8080/tcp: >-
     Port the station uploads to. Set the same port in the station's customized upload settings.

@@ -14,6 +14,8 @@ import logging
 import os
 import signal
 import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +24,8 @@ OPTIONS_FILE = os.environ.get("OPTIONS_FILE", "/data/options.json")
 # Overridable for tests; inside Supervisor the default is the only sensible value.
 WEBHOOK_BASE = os.environ.get("WEBHOOK_BASE", "http://supervisor/core/api/webhook/")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
+SUMMARY_INTERVAL = float(os.environ.get("SUMMARY_INTERVAL", "3600"))
+CHECK_INTERVAL = float(os.environ.get("CHECK_INTERVAL", "30"))
 UPLOAD_PATH = "/log/ha"
 MAX_BODY = 64 * 1024  # a full station upload is about 1 KiB
 FORWARD_TIMEOUT = 10
@@ -31,13 +35,12 @@ log = logging.getLogger("ecowitt-proxy")
 
 
 class Forwarder:
-    """Forwards a body to the webhook; logs only changes between working and failing at INFO, so
-    a healthy station doesn't write a log line every minute."""
+    """Forwards a body to the webhook. Returns None when Home Assistant took it, otherwise why not;
+    logging is left to Activity."""
 
     def __init__(self, url, token):
         self.url = url
         self.token = token
-        self.healthy = None
 
     def forward(self, body, content_type):
         request = urllib.request.Request(self.url, data=body, method="POST")
@@ -49,23 +52,99 @@ class Forwarder:
                 response.read()
                 status = response.status
         except urllib.error.HTTPError as err:
-            status = err.code
-            self._failed(f"Home Assistant answered HTTP {status}")
-            return status
+            return f"Home Assistant answered HTTP {err.code}"
         except (urllib.error.URLError, OSError) as err:
-            self._failed(f"Home Assistant unreachable: {getattr(err, 'reason', err)}")
-            return None
-        if self.healthy is not True:
-            log.info("Forwarding to Home Assistant works")
-        self.healthy = True
-        return status
+            return f"Home Assistant unreachable: {getattr(err, 'reason', err)}"
+        return None if status == 200 else f"Home Assistant answered HTTP {status}"
 
-    def _failed(self, message):
-        if self.healthy is not False:
-            log.error("%s; forwarding is failing", message)
+
+def duration(seconds):
+    seconds = int(round(seconds))
+    if seconds < 120:
+        value, unit = seconds, "second"
+    elif seconds < 7200:
+        value, unit = seconds // 60, "minute"
+    else:
+        value, unit = seconds // 3600, "hour"
+    return f"{value} {unit}" if value == 1 else f"{value} {unit}s"
+
+
+class Activity:
+    """What reaches the log at INFO and above, so a healthy station doesn't write a line a minute:
+    the first upload after start, changes between forwarding working and failing, a summary every
+    SUMMARY_INTERVAL, and a warning when the station goes quiet (and when it's back)."""
+
+    def __init__(self, stale_after, summary_every, clock=time.monotonic):
+        self.lock = threading.Lock()
+        self.clock = clock
+        self.stale_after = stale_after
+        self.summary_every = summary_every
+        self.started = self.window_start = clock()
+        self.last_upload = None
+        self.quiet_warned = False
+        self.forwarding_ok = None
+        self.forwarded = self.failed = 0
+        self.senders = set()
+
+    def record(self, sender, error):
+        with self.lock:
+            now = self.clock()
+            if self.quiet_warned:
+                log.info("Uploads resumed after %s", duration(now - (self.last_upload or self.started)))
+                self.quiet_warned = False
+            first = self.last_upload is None
+            self.last_upload = now
+            self.senders.add(sender)
+            if error is None:
+                self.forwarded += 1
+            else:
+                self.failed += 1
+
+            if first and error is None:
+                log.info("First upload since start, from %s: forwarded to Home Assistant", sender)
+            elif first:
+                log.error("First upload since start, from %s: not forwarded (%s)", sender, error)
+            elif error is None and self.forwarding_ok is False:
+                log.info("Forwarding to Home Assistant works again")
+            elif error is not None and self.forwarding_ok is not False:
+                log.error("Forwarding is failing: %s", error)
+            elif error is not None:
+                log.debug("Still failing: %s", error)
+            self.forwarding_ok = error is None
+
+    def tick(self):
+        with self.lock:
+            now = self.clock()
+            quiet = now - (self.last_upload or self.started)
+            if self.stale_after and not self.quiet_warned and quiet >= self.stale_after:
+                if self.last_upload is None:
+                    log.warning("No upload in the %s since start; check the station's customized "
+                                "upload settings", duration(quiet))
+                else:
+                    log.warning("No upload for %s; check the station", duration(quiet))
+                self.quiet_warned = True
+            if now - self.window_start >= self.summary_every:
+                self._summary(now)
+
+    def _summary(self, now):
+        span = now - self.window_start
+        label = "Last hour" if abs(span - 3600) < 60 else f"Last {duration(span)}"
+        total = self.forwarded + self.failed
+        if total == 0:
+            log.info("%s: no uploads", label)
         else:
-            log.debug(message)
-        self.healthy = False
+            senders = ", ".join(sorted(self.senders))
+            result = "all forwarded" if self.failed == 0 else (
+                f"{self.forwarded} forwarded, {self.failed} not")
+            log.info("%s: %d uploads from %s, %s", label, total, senders, result)
+        self.window_start = now
+        self.forwarded = self.failed = 0
+        self.senders = set()
+
+    def watch(self):
+        while True:
+            time.sleep(CHECK_INTERVAL)
+            self.tick()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -73,6 +152,7 @@ class Handler(BaseHTTPRequestHandler):
     sys_version = ""
     timeout = 15  # per connection, so a stalled client can't hold a thread forever
     forwarder = None  # set in main()
+    activity = None
 
     def do_GET(self):
         if self.path == "/":
@@ -97,8 +177,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         content_type = self.headers.get("Content-Type", "application/x-www-form-urlencoded")
         log.debug("Upload from %s: %d bytes", self.client_address[0], len(body))
-        status = self.forwarder.forward(body, content_type)
-        if status == 200:
+        error = self.forwarder.forward(body, content_type)
+        self.activity.record(self.client_address[0], error)
+        if error is None:
             self._reply(200, "OK\n")
         else:
             self._reply(502, "Home Assistant did not accept the upload\n")
@@ -148,7 +229,15 @@ def main():
     if not token:
         log.warning("SUPERVISOR_TOKEN is not set; Home Assistant will refuse the uploads")
 
+    try:
+        stale_after = float(os.environ.get("STALE_AFTER_SECONDS", "")
+                            or 60 * float(options.get("stale_after_minutes", 10)))
+    except ValueError:
+        log.error("stale_after_minutes is not a number")
+        return 1
+
     Handler.forwarder = Forwarder(WEBHOOK_BASE + webhook_id, token)
+    Handler.activity = Activity(stale_after, SUMMARY_INTERVAL)
     server = ThreadingHTTPServer(("", LISTEN_PORT), Handler)
     server.daemon_threads = True
     drop_privileges()
@@ -157,6 +246,9 @@ def main():
 
     # The webhook ID itself is never logged: anyone who has it can post into the integration.
     log.info("Listening on port %d for uploads to %s", LISTEN_PORT, UPLOAD_PATH)
+    if stale_after:
+        log.info("Warning when no upload arrives for %s", duration(stale_after))
+    threading.Thread(target=Handler.activity.watch, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
