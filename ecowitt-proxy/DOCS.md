@@ -21,15 +21,35 @@ so it never needs Home Assistant's external address or certificate.
    - Port: `4199` (or whatever you mapped under **Network**)
    - Upload interval: as you like; the integration takes anything from 16 s.
 
-The station uploads at the next interval. The add-on log shows "Forwarding to Home Assistant
-works" after the first upload that got through.
+The station uploads at the next interval, and the add-on log shows the result:
+
+```
+INFO    Listening on port 8080 for uploads to /log/ha
+INFO    Warning when no upload arrives for 10 minutes
+INFO    First upload since start, from 192.168.101.189: forwarded to Home Assistant
+```
+
+## What the log shows
+
+At the default `info` level the log stays quiet while things work, apart from an hourly summary:
+
+| Line | Meaning |
+|---|---|
+| `First upload since start, from <ip>: forwarded to Home Assistant` | After every (re)start, the first upload and whether it got through. |
+| `Last hour: 56 uploads from <ip>, all forwarded` | Hourly summary; `54 forwarded, 2 not` if some failed, `no uploads` if none came. |
+| `Forwarding is failing: Home Assistant answered HTTP 401` (error) | Home Assistant refused or was unreachable; logged once, not per upload. |
+| `Forwarding to Home Assistant works again` | The next upload after failures got through. |
+| `No upload for 10 minutes; check the station` (warning) | The station went quiet: Wi-Fi, power, or its upload settings. |
+| `No upload in the 10 minutes since start; ...` (warning) | Nothing has arrived since start: the station's server, port or path is probably wrong. |
+| `Uploads resumed after 23 minutes` | The station is back. |
 
 ## Options
 
 | Option | |
 |---|---|
 | **Webhook ID** | The integration's webhook ID. Anyone who has it can post data into the integration, so it is stored as a password and never logged. |
-| **Log level** | `info` logs start-up and changes between working and failing; `debug` logs every upload (size and sender, not the data). |
+| **Warn after quiet minutes** | Warn when no upload has arrived for this long (default 10; a station uploads about every minute). 0 turns it off. |
+| **Log level** | `info` logs what's in the table above; `debug` also logs every upload (size and sender, not the data). |
 
 ## Responses
 
