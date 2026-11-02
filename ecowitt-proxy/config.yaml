@@ -1,0 +1,29 @@
+# The add-on version is the Python version the image is built FROM, optionally with an "-rN" suffix
+# for add-on-only changes and for a new base-image digest under the same tag (3.14.10, then
+# 3.14.10-r1, ...). Renovate bumps this line and the Dockerfile's FROM together; CI fails if the two
+# disagree.
+name: Ecowitt proxy
+version: "3.14.10"
+slug: ecowitt_proxy
+description: Takes an Ecowitt station's plain-HTTP uploads and hands them to the Ecowitt integration
+url: https://github.com/rgilijamse/ha-addons/tree/main/ecowitt-proxy
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/rgilijamse/ecowitt-proxy-{arch}
+startup: services
+# Forwards to the webhook through Supervisor's Core API (http://supervisor/core), with
+# SUPERVISOR_TOKEN.
+homeassistant_api: true
+# A mapped port instead of host networking: the station posts to <host>:4199, nothing else of the
+# host's network is visible to the add-on.
+ports:
+  8080/tcp: 4199
+ports_description:
+  8080/tcp: Ecowitt uploads (plain HTTP)
+options:
+  webhook_id: ""
+  log_level: info
+schema:
+  webhook_id: password
+  log_level: list(debug|info|warning|error)
