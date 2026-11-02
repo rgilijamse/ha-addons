@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.76.0-r2
+
+- Fixed: the weekly digest listed images as "built date unknown" when their build timestamp
+  carried a time-zone offset (for example `+02:00`) instead of `Z`, so their age was never
+  checked against the 60-day limit. Offsets are now taken into account.
+  `trivy-watch.sh` from home-network-containers commit `bf7cc06`.
+
 ## 0.76.0-r1
 
 - Changed: no more daily message per new finding. Teams now gets a finding right away only when
