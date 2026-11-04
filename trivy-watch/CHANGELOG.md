@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.76.0-r3
+
+- Fixed: after Docker restarted a container in place (a Docker or host restart with
+  `restart: unless-stopped`, outside Home Assistant), the scanner looped on start-up with
+  `socat ... "/run/inspect-redact.sock" exists`: the container keeps its `/run`, so the previous
+  run's socket was still there. The redaction socket is now removed before listening
+  (`unlink-early`). Home Assistant recreates add-on containers, so the add-on itself wasn't hit.
+
 ## 0.76.0-r2
 
 - Fixed: the weekly digest listed images as "built date unknown" when their build timestamp

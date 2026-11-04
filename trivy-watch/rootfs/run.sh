@@ -81,7 +81,10 @@ fi
 echo "[INFO] The scanner user can't open /run/docker.sock; it reaches Docker only through the proxy."
 
 # Container inspect with the environment redacted; only haproxy (root) connects to this socket.
-socat UNIX-LISTEN:/run/inspect-redact.sock,fork,mode=600 EXEC:/usr/local/bin/inspect-redact.sh &
+# unlink-early: a container restarted in place (Docker restarting, a host reboot with restart:
+# unless-stopped) keeps its /run, so the previous run's socket is still there and socat would
+# refuse to listen, and run.sh exits: a restart loop.
+socat UNIX-LISTEN:/run/inspect-redact.sock,fork,mode=600,unlink-early EXEC:/usr/local/bin/inspect-redact.sh &
 REDACT_PID=$!
 
 mkdir -p /run/docker-ro
