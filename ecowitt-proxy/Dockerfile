@@ -1,7 +1,7 @@
 # Pinned by tag and digest. The tag must match config.yaml's version without its -rN suffix (CI
 # checks). A digest-only Renovate PR is how Alpine package fixes arrive under the same tag: bump
 # the -rN suffix in config.yaml in that PR, or it builds and releases nothing.
-FROM python:3.14.10-alpine3.24@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
+FROM python:3.15.2-alpine3.24@sha256:20a82dbc2783112ddb91d1534603f802d222a3e63e593cd002eb2ac534e70211
 
 # Upgrade whatever Alpine fixed since the base image was built; tzdata so log times follow the TZ
 # Supervisor sets. The add-on uses only the standard library, so pip goes too, with the urllib3,
