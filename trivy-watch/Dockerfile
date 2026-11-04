@@ -1,7 +1,7 @@
 # Pinned by digest: nothing updates Trivy but a deliberate bump, and its own release pipeline was
 # compromised in early 2026, so take releases at least two weeks old (Renovate waits 14 days). The
 # tag must match config.yaml's version without its -rN suffix; CI checks.
-FROM aquasec/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+FROM aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
 
 # bash and socat for inspect-redact.sh; setpriv and ionice (util-linux) for run.sh; curl, jq and
 # tzdata for trivy-watch, which then skips installing them at start. The scanner user gets fixed
