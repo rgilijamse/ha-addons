@@ -12,18 +12,23 @@
 #     headers, the kernel is the host's. Their kernel CVEs matched KEV on the first test run;
 #   - images matching exceptions.txt are scanned and kept in state but left out of the digest.
 #
-# Teams only hears about what asks for a decision. A new fixable CVE in an upstream image doesn't:
-# the fix is the upstream rebuild, which auto-update already pulls. Until 2026-10-30 every new
-# finding went to Teams daily and went unread, so now:
+# Messages go to Teams and to ntfy (topic alerts for KEV, priority 4; topic reports for the
+# digest, priority 2), whichever is configured: NTFY_URL and NTFY_TOKEN, both or neither. A
+# message counts as delivered once one channel took it; a channel that failed is a /fail reason,
+# not a retry, so the other never gets it twice.
+#
+# The messages carry only what asks for a decision. A new fixable CVE in an upstream image
+# doesn't: the fix is the upstream rebuild, which auto-update already pulls. Until 2026-10-30
+# every new finding was sent daily and went unread, so now:
 #   - daily, only a finding whose CVE is on CISA's Known Exploited Vulnerabilities list (KEV),
 #     once per finding, excepted images included: someone is using it, so for an image reachable
 #     from outside, stopping the container until upstream ships the fix is on the table. A CVE
 #     added to KEV later alerts then. The feed is cached in state; the run fails the healthchecks
 #     check once the cache is older than KEV_MAX_AGE days;
 #   - weekly, the digest (below).
-# History lives in the container log, not in Teams: every new finding is logged as NEW, every one
-# that disappeared (image fixed upstream, or container removed) as RESOLVED with the date it was
-# first seen, which state keeps per finding. `docker logs trivy-watch | grep RESOLVED`.
+# History lives in the container log, not in the messages: every new finding is logged as NEW,
+# every one that disappeared (image fixed upstream, or container removed) as RESOLVED with the
+# date it was first seen, which state keeps per finding. `docker logs trivy-watch | grep RESOLVED`.
 #
 # Weekly digest (DIGEST_DAY, after the scan), each line a decision:
 #   - images with findings first seen more than OVERDUE_DAYS ago: a fix exists (only fixable
@@ -38,8 +43,8 @@
 # Known blind spot: images built on the official php images get PHP compiled from source, so
 # Trivy never sees a PHP version there. That's what the advisory feed is for.
 #
-# healthchecks.io: /start before, success after, /fail with the reason when a scan failed or Teams
-# didn't accept the message. A dead scanner looks exactly like a clean fleet otherwise.
+# healthchecks.io: /start before, success after, /fail with the reason when a scan failed or a
+# channel didn't accept a message. A dead scanner looks exactly like a clean fleet otherwise.
 #
 # Busybox sh (the Trivy image is Alpine): no arrays, no [[ ]]. curl, jq and tzdata are installed at
 # container start (not per run) unless the image already has them: the Trivy image has none, Docker's
@@ -64,6 +69,10 @@ OVERDUE_DAYS=${OVERDUE_DAYS:-30}     # digest: findings open longer than this
 KEV_URL=${KEV_URL-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
 KEV_MAX_AGE=${KEV_MAX_AGE:-3}        # days a cached KEV feed may be used when the download fails
 TEAMS_WEBHOOK_URL=${TEAMS_WEBHOOK_URL:-}
+NTFY_URL=${NTFY_URL:-}               # ntfy server root; with NTFY_TOKEN, messages go there too
+NTFY_TOKEN=${NTFY_TOKEN:-}
+NTFY_ALERTS=${NTFY_ALERTS:-alerts}   # topic for the KEV alert
+NTFY_REPORTS=${NTFY_REPORTS:-reports} # topic for the weekly digest
 HC_PING_URL=${HC_PING_URL:-}
 ADVISORY_HEARTBEAT=${ADVISORY_HEARTBEAT:-}   # advisory-watch.sh's last-ok file, where it runs
 EXCEPTIONS=${EXCEPTIONS:-/etc/trivy-watch/exceptions.txt}
@@ -109,6 +118,42 @@ teams() {
         }]
     }' | curl -fsS -m 30 --retry 3 -o /dev/null -H 'Content-Type: application/json' \
         --data-binary @- "$TEAMS_WEBHOOK_URL"
+}
+
+# ntfy <topic> <priority> <title> <markdown file>; returns non-zero if ntfy didn't take it. The
+# phone app shows markdown as plain text, so the ** go, and the body is cut at 3500 characters:
+# ntfy turns a message over 4 KB into an attachment, which a server without attachments refuses.
+ntfy() {
+    if [ "$DRY_RUN" = 1 ] || [ -z "$NTFY_URL" ] || [ -z "$NTFY_TOKEN" ]; then
+        log "NTFY (not sent): $1, priority $2: $3"; return 0
+    fi
+    sed 's/\*\*//g' "$4" | jq -Rs --arg topic "$1" --argjson prio "$2" --arg title "$3" '{
+        topic: $topic, priority: $prio, title: $title, tags: ["shield"],
+        message: (if length > 3500 then .[0:3500] + "\n\n(cut short: too long for a notification)"
+                  else . end)
+    }' | curl -fsS -m 30 --retry 3 -o /dev/null -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $NTFY_TOKEN" --data-binary @- "${NTFY_URL%/}/"
+}
+
+# notify <topic> <priority> <title> <markdown file>: to Teams and ntfy, whichever is configured.
+# Delivered (status 0) once at least one channel took it, so state moves on and a retry never
+# sends the same message twice; NOTIFY_ERR then names a channel that failed, for healthchecks.io.
+# Nothing configured at all: printed, as a dry run.
+notify() {
+    NOTIFY_ERR=""
+    if [ "$DRY_RUN" = 1 ] || { [ -z "$TEAMS_WEBHOOK_URL" ] && { [ -z "$NTFY_URL" ] || [ -z "$NTFY_TOKEN" ]; }; }; then
+        teams "$3" "$4"; ntfy "$@"; return 0
+    fi
+    _delivered=0
+    if [ -n "$TEAMS_WEBHOOK_URL" ]; then
+        if teams "$3" "$4"; then _delivered=1; else NOTIFY_ERR="Teams did not accept \"$3\""; fi
+    fi
+    if [ -n "$NTFY_URL" ] && [ -n "$NTFY_TOKEN" ]; then
+        if ntfy "$@"; then _delivered=1
+        else NOTIFY_ERR="${NOTIFY_ERR:+$NOTIFY_ERR; }ntfy did not accept \"$3\""; fi
+    fi
+    [ -z "$NOTIFY_ERR" ] || log "$NOTIFY_ERR"
+    [ "$_delivered" = 1 ]
 }
 
 # Prints the exception line matching image reference $1 (shell glob in column 1), if any.
@@ -234,8 +279,9 @@ report() {
 }
 
 # Alerts once per finding whose CVE is on CISA's KEV list; returns non-zero if the feed is too old
-# or Teams didn't take the alert (KEV_ERR says which). Alerted keys live in $STATE/kev-alerted.txt,
-# pruned to the current findings, so a finding that resolves and comes back alerts again.
+# or no channel took the alert. KEV_ERR says what went wrong, also when one channel failed.
+# Alerted keys live in $STATE/kev-alerted.txt, pruned to the current findings, so a finding that
+# resolves and comes back alerts again.
 kev() {
     R="$STATE/run"
     KEV_ERR=""
@@ -262,12 +308,14 @@ kev() {
               printf "- %s %s %s %s -> %s: %s%s\n", $2, k[2], k[3], $3, $4, $5,
                   ($6 == "1" ? " (excepted image)" : "") }' >"$R/kev.md"
         awk -F'\t' '{ printf "    KEV %s %s\n", $2, $1 }' "$R/kev-new.tsv"
-        if ! teams "Trivy $HOST_LABEL: $n known exploited vulnerabilit$([ "$n" = 1 ] && echo y || echo ies)" \
+        if ! notify "$NTFY_ALERTS" 4 \
+                "Trivy $HOST_LABEL: $n known exploited vulnerabilit$([ "$n" = 1 ] && echo y || echo ies)" \
                 "$R/kev.md"; then
-            KEV_ERR="Teams did not accept the KEV alert"; return 1
+            KEV_ERR="no channel accepted the KEV alert ($NOTIFY_ERR)"; return 1
         fi
+        KEV_ERR=$NOTIFY_ERR
     fi
-    # Only once Teams has the alert, so a failed send is retried on the next run.
+    # Only once a channel has the alert, so a send that failed everywhere is retried next run.
     cut -f1 "$R/kev-hits.tsv" | sort -u >"$STATE/kev-alerted.txt"
 }
 
@@ -325,7 +373,7 @@ digest() {
                  | jq -r '.tag_name + " " + (.published_at | .[0:10])' 2>/dev/null)
         echo "- Trivy here: $mine; latest upstream: ${latest:-unknown} (take releases two weeks old or more)"
     } >"$R/digest.md"
-    teams "Trivy $HOST_LABEL: weekly digest" "$R/digest.md"
+    notify "$NTFY_REPORTS" 2 "Trivy $HOST_LABEL: weekly digest" "$R/digest.md"
 }
 
 run_once() {
@@ -336,10 +384,12 @@ run_once() {
     # Without a container list there is nothing to compare: reporting would "resolve" everything.
     if [ "$SCAN_FATAL" = 0 ]; then
         report
-        kev || err="${err:+$err; }$KEV_ERR"
+        kev
+        [ -z "$KEV_ERR" ] || err="${err:+$err; }$KEV_ERR"
     fi
     if [ "$SCAN_FATAL" = 0 ] && { [ "$(date +%u)" = "$DIGEST_DAY" ] || [ "$FORCE_DIGEST" = 1 ]; }; then
-        digest || err="${err:+$err; }Teams did not accept the digest"
+        digest
+        [ -z "$NOTIFY_ERR" ] || err="${err:+$err; }$NOTIFY_ERR"
     fi
     # advisory-watch.sh has no healthchecks.io check of its own; this one vouches for it.
     if [ -n "$ADVISORY_HEARTBEAT" ] && [ -z "$(find "$ADVISORY_HEARTBEAT" -mmin -360 2>/dev/null)" ]; then

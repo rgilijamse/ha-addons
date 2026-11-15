@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.76.1-r1
+
+- Added: ntfy as a channel, next to Teams or instead of it (**ntfy server URL** and **ntfy access
+  token**). Known exploited findings go to topic `alerts` at priority 4, the weekly digest to
+  `reports` at priority 2; `NTFY_ALERTS` and `NTFY_REPORTS` in **Extra environment** change the
+  topics. A message counts as delivered once one channel took it; a channel that failed fails the
+  healthchecks.io check, and is not retried, so the other never gets it twice.
+- Changed: **Teams webhook URL** is no longer required. The add-on needs the healthchecks.io ping
+  URL and at least one channel, and refuses an ntfy URL without a token or the other way round.
+  `NTFY_URL` and `NTFY_TOKEN` are refused in **Extra environment**: the token belongs in its
+  password field.
+- `trivy-watch.sh` from home-network-containers commit `919c568`.
+
 ## 0.76.0-r3
 
 - Fixed: after Docker restarted a container in place (a Docker or host restart with

@@ -12,6 +12,8 @@ OPTIONS=/data/options.json
 opt() { jq -r --arg key "$1" '.[$key] // empty' "$OPTIONS"; }
 
 TEAMS_WEBHOOK_URL="$(opt teams_webhook_url)"
+NTFY_URL="$(opt ntfy_url)"
+NTFY_TOKEN="$(opt ntfy_token)"
 HC_PING_URL="$(opt hc_ping_url)"
 HOST_LABEL="$(opt host_label)"
 RUN_AT="$(opt run_at)"
@@ -19,9 +21,17 @@ DIGEST_DAY="$(opt digest_day)"
 DRY_RUN=0
 [ "$(opt dry_run)" = "true" ] && DRY_RUN=1
 
-# Fail closed: a scanner that quietly sends nothing looks exactly like a clean host.
-if [ "$DRY_RUN" = 0 ] && { [ -z "$TEAMS_WEBHOOK_URL" ] || [ -z "$HC_PING_URL" ]; }; then
-    echo "[ERROR] teams_webhook_url and hc_ping_url are both required, unless dry_run is on."
+# ntfy needs both: the script skips ntfy when either is empty, which would pass the check below
+# with Teams set and lose every ntfy message without a word.
+if { [ -n "$NTFY_URL" ] && [ -z "$NTFY_TOKEN" ]; } || { [ -z "$NTFY_URL" ] && [ -n "$NTFY_TOKEN" ]; }; then
+    echo "[ERROR] ntfy_url and ntfy_token go together: set both, or neither."
+    exit 1
+fi
+# Fail closed: a scanner that quietly sends nothing looks exactly like a clean host. At least one
+# channel (Teams, ntfy or both) and the healthchecks.io check.
+if [ "$DRY_RUN" = 0 ] && { [ -z "$HC_PING_URL" ] || { [ -z "$TEAMS_WEBHOOK_URL" ] && [ -z "$NTFY_URL" ]; }; }; then
+    echo "[ERROR] hc_ping_url and a channel (teams_webhook_url, or ntfy_url with ntfy_token) are"
+    echo "[ERROR] required, unless dry_run is on."
     exit 1
 fi
 if [ -z "$HOST_LABEL" ]; then
@@ -31,7 +41,7 @@ fi
 
 # extra_env is for settings trivy-watch gains later. Refused: what the add-on sets itself, so each
 # setting has one source and the secrets can't be overridden from a clear-text option.
-RESERVED=" SOCK STATE EXCEPTIONS DOCKER_HOST TMPDIR TEAMS_WEBHOOK_URL HC_PING_URL HOST_LABEL RUN_AT DIGEST_DAY DRY_RUN "
+RESERVED=" SOCK STATE EXCEPTIONS DOCKER_HOST TMPDIR TEAMS_WEBHOOK_URL NTFY_URL NTFY_TOKEN HC_PING_URL HOST_LABEL RUN_AT DIGEST_DAY DRY_RUN "
 EXTRA=()
 while IFS= read -r entry; do
     [ -n "$entry" ] || continue
@@ -105,7 +115,8 @@ fi
 as_scanner env -i \
     PATH="$PATH" TZ="${TZ:-UTC}" HOME="$STATE" \
     SOCK=/run/docker-ro/docker.sock STATE="$STATE" TMPDIR="$TMPDIR" EXCEPTIONS="$EXCEPTIONS" \
-    TEAMS_WEBHOOK_URL="$TEAMS_WEBHOOK_URL" HC_PING_URL="$HC_PING_URL" HOST_LABEL="$HOST_LABEL" \
+    TEAMS_WEBHOOK_URL="$TEAMS_WEBHOOK_URL" NTFY_URL="$NTFY_URL" NTFY_TOKEN="$NTFY_TOKEN" \
+    HC_PING_URL="$HC_PING_URL" HOST_LABEL="$HOST_LABEL" \
     RUN_AT="$RUN_AT" DIGEST_DAY="$DIGEST_DAY" DRY_RUN="$DRY_RUN" \
     "${EXTRA[@]}" \
     nice -n 10 ionice -c 3 /usr/local/bin/trivy-watch &

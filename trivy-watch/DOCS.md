@@ -1,7 +1,8 @@
 # Trivy watch
 
 Scans every image a running container on this host uses, once a day, with
-[Trivy](https://trivy.dev), and reports to a Microsoft Teams channel:
+[Trivy](https://trivy.dev), and reports to a Microsoft Teams channel, an [ntfy](https://ntfy.sh)
+server, or both:
 
 - **Daily, only known exploited vulnerabilities.** A fixable HIGH or CRITICAL finding whose CVE
   is on [CISA's Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
@@ -41,7 +42,8 @@ Trivy and the scan script run as an unprivileged user that can reach only the pr
 capabilities and with only the settings below in their environment. The add-on checks on every
 start that this user can't open the real Docker socket, and refuses to run if it can.
 
-**What leaves the host:** known exploited findings and the digest to your Teams webhook, a start, success or
+**What leaves the host:** known exploited findings and the digest to your Teams webhook and/or ntfy
+server, a start, success or
 failure ping per scan to your healthchecks.io check, and Trivy's own downloads of its
 vulnerability database (from `mirror.gcr.io`), of the latest release number (from GitHub) and of
 CISA's list of known exploited vulnerabilities (from `www.cisa.gov`).
@@ -59,12 +61,21 @@ Nothing listens on this host.
 
 ## Setup
 
-1. In Teams, create an incoming webhook for the channel the findings should go to.
+1. Pick where the findings go, one or both:
+   - **Teams:** create an incoming webhook for the channel.
+   - **ntfy:** create a user with write access to the topics `alerts` and `reports` and a token
+     for it (`ntfy access <user> alerts write-only`, the same for `reports`, then
+     `ntfy token add <user>`). Known exploited findings go to `alerts` at priority 4, the digest
+     to `reports` at priority 2 (silent on most phones). Other topic names: `NTFY_ALERTS=...` and
+     `NTFY_REPORTS=...` in **Extra environment**.
 2. On [healthchecks.io](https://healthchecks.io), create a check with a daily period and a grace
    time of a few hours. A scanner that has stopped looks exactly like a host with nothing to
    report; the check is what tells the two apart.
-3. Set **Teams webhook URL** and **healthchecks.io ping URL**. The add-on refuses to start
-   without them, unless **Dry run** is on.
+3. Set **healthchecks.io ping URL** and **Teams webhook URL**, **ntfy server URL** with **ntfy
+   access token**, or all three. The add-on refuses to start without the ping URL and at least
+   one channel, unless **Dry run** is on. A message counts as delivered once one channel took
+   it; a channel that failed fails the healthchecks.io check rather than being retried, so the
+   other channel never gets the same message twice.
 4. Start the add-on. The first scan runs at **Run at** (05:00 by default) and records a baseline.
    To run it right away, add `RUN_ON_START=1` to **Extra environment** for one start.
 
@@ -75,7 +86,9 @@ shows the scan and the message it would have sent.
 
 | Option | Required | Meaning |
 |---|---|---|
-| `teams_webhook_url` | yes | Teams incoming webhook for findings and the digest. |
+| `teams_webhook_url` | one channel | Teams incoming webhook for findings and the digest. |
+| `ntfy_url` | one channel | Root URL of an ntfy server, for example `https://ntfy.example.org`. Needs `ntfy_token`. |
+| `ntfy_token` | with `ntfy_url` | ntfy access token (`tk_...`) of a user that may publish to `alerts` and `reports`. |
 | `hc_ping_url` | yes | healthchecks.io ping URL, without `/start` or `/fail`. |
 | `host_label` | yes | Name of this host in the messages (default `hassio`). |
 | `run_at` | yes | Daily scan time, `HH:MM` in Home Assistant's time zone (default `05:00`). |

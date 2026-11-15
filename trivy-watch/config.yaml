@@ -2,9 +2,9 @@
 # for add-on-only changes, a new copy of trivy-watch.sh included (0.75.0, then 0.75.0-r1, ...).
 # Renovate bumps this line and the Dockerfile's FROM together; CI fails if the two disagree.
 name: Trivy watch
-version: "0.76.1"
+version: "0.76.1-r1"
 slug: trivy_watch
-description: Daily vulnerability scan of this host's add-on images, what needs a decision sent to Teams
+description: Daily vulnerability scan of this host's add-on images, what needs a decision sent to Teams or ntfy
 url: https://github.com/rgilijamse/ha-addons/tree/main/trivy-watch
 arch:
   - amd64
@@ -22,11 +22,13 @@ backup_exclude:
   - "state/cache/*"
   - "state/run/*"
   - "tmp/*"
-# The two URLs are listed here (empty) only so the UI shows them: optional options without a
-# default are hidden behind "Show unused optional configuration options". run.sh refuses to start
-# without them unless dry_run is on.
+# The channels and the ping URL are listed here (empty) only so the UI shows them: optional
+# options without a default are hidden behind "Show unused optional configuration options".
+# run.sh refuses to start without the ping URL and at least one channel, unless dry_run is on.
 options:
   teams_webhook_url: ""
+  ntfy_url: ""
+  ntfy_token: ""
   hc_ping_url: ""
   host_label: hassio
   run_at: "05:00"
@@ -35,6 +37,8 @@ options:
   dry_run: false
 schema:
   teams_webhook_url: password?
+  ntfy_url: str?
+  ntfy_token: password?
   hc_ping_url: password?
   host_label: str
   run_at: match(^([01][0-9]|2[0-3]):[0-5][0-9]$)
