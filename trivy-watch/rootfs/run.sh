@@ -62,7 +62,7 @@ mkdir -p "$STATE" "$TMPDIR"
 find "$TMPDIR" -mindepth 1 -delete
 chown -R scanner:scanner "$STATE" "$TMPDIR"
 
-# The exceptions file is the user's to edit, in this add-on's folder of addon_configs. The script
+# The exceptions file is the user's to edit, in this add-on's folder of addon_configs (app_config). The script
 # treats a missing file as "no exceptions", silently, so it is always there.
 EXCEPTIONS=/config/exceptions.txt
 if [ ! -f "$EXCEPTIONS" ]; then
@@ -122,10 +122,17 @@ as_scanner env -i \
     nice -n 10 ionice -c 3 /usr/local/bin/trivy-watch &
 WATCH_PID=$!
 
-trap 'kill -TERM "$HAPROXY_PID" "$REDACT_PID" "$WATCH_PID" 2>/dev/null' TERM INT
+# A stop (Supervisor sends TERM) interrupts wait -n with status 143; exit 0 then, or Supervisor
+# logs that the add-on "did not handle SIGTERM". A process that died on its own still exits
+# non-zero, for the watchdog.
+STOPPING=0
+trap 'STOPPING=1; kill -TERM "$HAPROXY_PID" "$REDACT_PID" "$WATCH_PID" 2>/dev/null' TERM INT
 set +e
 wait -n "$HAPROXY_PID" "$REDACT_PID" "$WATCH_PID"
 STATUS=$?
 kill -TERM "$HAPROXY_PID" "$REDACT_PID" "$WATCH_PID" 2>/dev/null
 wait
+if [ "$STOPPING" = 1 ]; then
+    exit 0
+fi
 exit "$STATUS"

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.76.1.3
+
+- Fixed: a stop or update no longer makes Supervisor log that the add-on "did not handle
+  SIGTERM". The add-on already shut its processes down on a stop, but then exited with 143; it now
+  exits 0. A process that dies on its own still ends the add-on with an error, so the watchdog
+  restarts it.
+- Changed: haproxy no longer warns at start that it runs as root without a chroot. It still does,
+  on purpose, and now says so in its configuration: it holds the Docker socket, which is root on
+  the host whatever user it runs as, and the socket would have to be inside any chroot. The
+  read-only allowlist and the unprivileged scanner are what keep Trivy away from the socket.
+
 ## 0.76.1.2
 
 - Fixed: Home Assistant offers this release as an update. Add-on-only releases now add a fourth
