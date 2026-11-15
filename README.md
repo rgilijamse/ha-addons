@@ -10,7 +10,7 @@ https://github.com/rgilijamse/ha-addons
 | | Add-on | What it does |
 |---|---|---|
 | <img src="komodo-periphery/icon.png" alt="" width="48"> | [Komodo Periphery (read-only)](komodo-periphery/) | Lets Komodo Core see this host's add-on containers, without being able to change them. |
-| <img src="trivy-watch/icon.png" alt="" width="48"> | [Trivy watch](trivy-watch/) | Scans this host's add-on images for vulnerabilities daily and sends new findings to Teams. |
+| <img src="trivy-watch/icon.png" alt="" width="48"> | [Trivy watch](trivy-watch/) | Scans this host's add-on images for vulnerabilities daily and sends what needs a decision to Teams or ntfy. |
 | <img src="ecowitt-proxy/icon.png" alt="" width="48"> | [Ecowitt proxy](ecowitt-proxy/) | Takes an Ecowitt station's plain-HTTP uploads and hands them to the Ecowitt integration. |
 
 ## How releases work

@@ -6,7 +6,7 @@
 ![Supports amd64][amd64-shield] ![Supports aarch64][aarch64-shield]
 
 A daily [Trivy](https://trivy.dev) vulnerability scan of every running add-on container on this
-host. Microsoft Teams hears only what needs a decision: known exploited vulnerabilities right away,
+host. Microsoft Teams or ntfy hears only what needs a decision: known exploited vulnerabilities right away,
 and once a week the fixes that aren't arriving.
 
 - Official `aquasec/trivy` image, pinned by digest.
@@ -14,7 +14,7 @@ and once a week the fixes that aren't arriving.
 - Weekly digest of findings still open after 30 days, and of images built long ago or on an
   end-of-life OS: the add-ons whose maintainers stopped rebuilding.
 - Docker access only through a read-only allowlist proxy, and Trivy runs as an unprivileged user.
-- Nothing listens on this host; findings go out to Teams and a healthchecks.io check.
+- Nothing listens on this host; findings go out to Teams and/or ntfy, and a healthchecks.io check.
 
 See the **Documentation** tab for setup.
 

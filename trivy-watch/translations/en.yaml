@@ -3,7 +3,16 @@ configuration:
     name: Teams webhook URL
     description: >-
       Microsoft Teams incoming webhook that known exploited findings and the weekly digest are sent to.
-      Required unless Dry run is on.
+      Optional when ntfy is set; one of the two is required unless Dry run is on.
+  ntfy_url:
+    name: ntfy server URL
+    description: >-
+      Root URL of an ntfy server, such as https://ntfy.example.org. Known exploited findings go to
+      topic alerts (priority 4), the weekly digest to topic reports (priority 2). Needs the token.
+  ntfy_token:
+    name: ntfy access token
+    description: >-
+      Access token (tk_...) of an ntfy user allowed to publish to both topics.
   hc_ping_url:
     name: healthchecks.io ping URL
     description: >-
@@ -11,7 +20,7 @@ configuration:
       Dry run is on.
   host_label:
     name: Host label
-    description: Name of this host in Teams messages.
+    description: Name of this host in the messages.
   run_at:
     name: Run at
     description: Daily scan time, HH:MM in Home Assistant's time zone.
@@ -25,4 +34,4 @@ configuration:
       RUN_ON_START=1. Shown in clear text, so never put a secret here.
   dry_run:
     name: Dry run
-    description: Log what would be sent to Teams instead of sending it, and ping nothing.
+    description: Log what would be sent instead of sending it, and ping nothing.
