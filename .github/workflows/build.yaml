@@ -45,9 +45,16 @@ jobs:
         id: version
         run: |
           version="$(yq -r .version "$ADDON/config.yaml")"
+          # Upstream version, plus an optional fourth number for add-on-only changes. No "-rN" or
+          # other suffix: Home Assistant compares versions as SemVer, where 2.3.4-r1 is a
+          # pre-release that sorts below 2.3.4, so the update is never offered.
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::$ADDON version $version is not X.Y.Z or X.Y.Z.N"
+            exit 1
+          fi
           echo "addon=$version" >> "$GITHUB_OUTPUT"
-          # 2.3.3-r1 -> 2.3.3: the -rN suffix marks add-on-only changes.
-          echo "upstream=${version%-r*}" >> "$GITHUB_OUTPUT"
+          # 2.3.4.1 -> 2.3.4
+          echo "upstream=$(printf '%s' "$version" | cut -d. -f1-3)" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER}/${ADDON}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
 
       # trivy-watch pins Trivy by tag and digest in its Dockerfile, so the add-on version can't

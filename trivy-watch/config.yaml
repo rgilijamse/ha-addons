@@ -1,8 +1,10 @@
-# The add-on version is the Trivy version the image is built FROM, optionally with an "-rN" suffix
-# for add-on-only changes, a new copy of trivy-watch.sh included (0.75.0, then 0.75.0-r1, ...).
+# The add-on version is the Trivy version the image is built FROM, optionally with a fourth number
+# for add-on-only changes, a new copy of trivy-watch.sh included (0.76.1, then 0.76.1.1, ...). Not
+# "-rN": Home Assistant compares versions as SemVer, where 0.76.1-r1 is a pre-release of 0.76.1,
+# so it sorts lower and the Update button stays greyed out (0.76.1-r1 came out that way).
 # Renovate bumps this line and the Dockerfile's FROM together; CI fails if the two disagree.
 name: Trivy watch
-version: "0.76.1-r1"
+version: "0.76.1.2"
 slug: trivy_watch
 description: Daily vulnerability scan of this host's add-on images, what needs a decision sent to Teams or ntfy
 url: https://github.com/rgilijamse/ha-addons/tree/main/trivy-watch
@@ -14,7 +16,7 @@ image: ghcr.io/rgilijamse/trivy-watch-{arch}
 # allowlist proxy in rootfs/etc/haproxy/scanner.cfg; Trivy and trivy-watch never see it directly.
 docker_api: true
 map:
-  - type: addon_config
+  - type: app_config
     read_only: false
 # The vulnerability DB, Trivy's cache and image tarballs are re-created on the next scan; only the
 # findings state (state/findings.tsv) is worth backing up.

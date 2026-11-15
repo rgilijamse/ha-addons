@@ -6,12 +6,12 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "komodo-periphery's add-on version is the upstream Periphery version (plus an optional -rN suffix, dropped on a bump)",
+      "description": "komodo-periphery's add-on version is the upstream Periphery version (plus an optional fourth number for add-on-only changes, dropped on a bump)",
       "managerFilePatterns": [
         "/^komodo-periphery/config\\.yaml$/"
       ],
       "matchStrings": [
-        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""
+        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:\\.\\d+)?\""
       ],
       "depNameTemplate": "ghcr.io/moghtech/komodo-periphery",
       "datasourceTemplate": "docker",
@@ -20,12 +20,12 @@
     },
     {
       "customType": "regex",
-      "description": "trivy-watch's add-on version is the Trivy version its Dockerfile is FROM (plus an optional -rN suffix, dropped on a bump)",
+      "description": "trivy-watch's add-on version is the Trivy version its Dockerfile is FROM (plus an optional fourth number for add-on-only changes, dropped on a bump)",
       "managerFilePatterns": [
         "/^trivy-watch/config\\.yaml$/"
       ],
       "matchStrings": [
-        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""
+        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:\\.\\d+)?\""
       ],
       "depNameTemplate": "aquasec/trivy",
       "datasourceTemplate": "docker",
@@ -34,12 +34,12 @@
     },
     {
       "customType": "regex",
-      "description": "ecowitt-proxy's add-on version is the Python version its Dockerfile is FROM (plus an optional -rN suffix, dropped on a bump)",
+      "description": "ecowitt-proxy's add-on version is the Python version its Dockerfile is FROM (plus an optional fourth number for add-on-only changes, dropped on a bump)",
       "managerFilePatterns": [
         "/^ecowitt-proxy/config\\.yaml$/"
       ],
       "matchStrings": [
-        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:-r\\d+)?\""
+        "version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)(?:\\.\\d+)?\""
       ],
       "depNameTemplate": "python",
       "datasourceTemplate": "docker",
@@ -65,7 +65,7 @@
       "automerge": false
     },
     {
-      "description": "ecowitt-proxy's Python base: a new tag moves the Dockerfile's FROM and the add-on version in one PR (CI fails if they disagree). A digest-only update (Alpine fixes under the same tag) changes only the Dockerfile, so that PR also needs the -rN suffix in config.yaml bumped, or it releases nothing; plus a CHANGELOG entry either way. Weekly, so base-image churn doesn't mean a PR every few days",
+      "description": "ecowitt-proxy's Python base: a new tag moves the Dockerfile's FROM and the add-on version in one PR (CI fails if they disagree). A digest-only update (Alpine fixes under the same tag) changes only the Dockerfile, so that PR also needs the fourth number in config.yaml bumped, or it releases nothing; plus a CHANGELOG entry either way. Weekly, so base-image churn doesn't mean a PR every few days",
       "matchFileNames": [
         "ecowitt-proxy/**"
       ],
