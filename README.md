@@ -20,18 +20,22 @@ so Home Assistant pulls them instead of building on the host. A build is pushed 
 add-on's `version` in `config.yaml` is new; changing an add-on without bumping its version builds
 and tests it but releases nothing.
 
-For `komodo-periphery`, the version *is* the upstream Periphery version, with an optional `-rN`
-suffix for add-on-only changes (`2.3.3`, `2.3.3-r1`, ...). Renovate opens a pull request when a new
+For `komodo-periphery`, the version *is* the upstream Periphery version, with an optional fourth
+number for add-on-only changes (`2.3.4`, `2.3.4.1`, ...). Renovate opens a pull request when a new
 Periphery release appears; merging it releases the add-on.
 
-`trivy-watch` works the same way with the Trivy version (`0.75.0`, `0.75.0-r1`, ...); a new copy of
+`trivy-watch` works the same way with the Trivy version (`0.76.1`, `0.76.1.1`, ...); a new copy of
 its scan script is an add-on-only change. Renovate waits 14 days after a Trivy release before
 proposing it.
 
-`ecowitt-proxy` is versioned by the official `python` image it is built FROM (`3.14.10`,
-`3.14.10-r1`, ...). Renovate checks weekly. A new Python tag bumps the version with it. A new
+`ecowitt-proxy` is versioned by the official `python` image it is built FROM (`3.15.2`,
+`3.15.2.1`, ...). Renovate checks weekly. A new Python tag bumps the version with it. A new
 digest under the same tag, which is how Alpine package fixes arrive, only touches the Dockerfile:
-bump the `-rN` suffix in that PR, or merging it releases nothing.
+bump the fourth number in that PR, or merging it releases nothing.
+
+Not `-rN`: Home Assistant compares add-on versions as SemVer, where `2.3.4-r1` is a pre-release of
+`2.3.4` and sorts below it, so the Update button stays greyed out. Releases up to `0.76.1-r1` used
+that suffix; CI now refuses it.
 
 ## License
 

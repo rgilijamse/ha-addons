@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.76.1.2
+
+- Fixed: Home Assistant offers this release as an update. Add-on-only releases now add a fourth
+  number to the Trivy version instead of an `-rN` suffix: Home Assistant compares versions as
+  SemVer, so `0.76.1-r1` counted as a pre-release of `0.76.1`, sorted below it, and its Update
+  button stayed greyed out (Supervisor would still install it through its API). No change to the
+  scanner or the scan script.
+- Changed: the add-on's folder is mapped as `app_config`, Supervisor's name for `addon_config`
+  since 2026.07, which silences its "legacy map type" warning. Same folder, same `/config`
+  mount: `exceptions.txt` stays where it is.
+
 ## 0.76.1-r1
 
 - Added: ntfy as a channel, next to Teams or instead of it (**ntfy server URL** and **ntfy access
