@@ -4,7 +4,7 @@
 # so it sorts lower and the Update button stays greyed out (0.76.1-r1 came out that way).
 # Renovate bumps this line and the Dockerfile's FROM together; CI fails if the two disagree.
 name: Trivy watch
-version: "0.76.1.3"
+version: "0.76.2"
 slug: trivy_watch
 description: Daily vulnerability scan of this host's add-on images, what needs a decision sent to Teams or ntfy
 url: https://github.com/rgilijamse/ha-addons/tree/main/trivy-watch
